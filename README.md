@@ -1,6 +1,6 @@
-# x-protos
+# protos
 
-gRPC contracts (`.proto` only). Generated stubs live in `x-protogen`.
+gRPC contracts (`.proto` only). Generated stubs live in `protogen`.
 
 ```
 ping/v1/ping.proto
@@ -23,16 +23,16 @@ bash proto/scripts/verify.sh
 
 - Verify always (`lint` + `build`; breaking when a previous tag exists).
 - After a successful verify on `main`, auto-create the next semver tag (first tag is `v0.1.0`, later pushes default to **patch**). `pull_request` verifies only. Push with no `.proto` / `buf.yaml` / `buf.gen.yaml` changes does not tag.
-- Creating that tag starts [notify-protogen](.github/workflows/notify-protogen.yml), which sends `repository_dispatch` to `x-protogens` with `proto_ref` and `proto_repo`.
+- Creating that tag starts [notify-protogen](.github/workflows/notify-protogen.yml), which sends `repository_dispatch` to `protogens` with `proto_ref` and `proto_repo`.
 
 Re-notify an existing tag: **Run workflow** on notify-protogen and set `proto_ref` (e.g. `v0.2.0`).
 
 Secret on this repo: `PROTOGEN_DISPATCH_TOKEN`.  
-Optional variable: `PROTOGEN_REPO` (default `huponx/x-protogen`).
+Optional variable: `PROTOGEN_REPO` (default `huponx/protogen`).
 
-`GITHUB_TOKEN` of proto cannot dispatch another repo. Create a **fine-grained PAT** (or GitHub App) and grant it **on `x-protogen`**, not proto:
+`GITHUB_TOKEN` of proto cannot dispatch another repo. Create a **fine-grained PAT** (or GitHub App) and grant it **on `protogen`**, not proto:
 
-- Repository access: only `x-protogen`
+- Repository access: only `protogen`
 - **Contents: Read and write** (required for `POST /repos/.../dispatches`)
 - **Actions: Read and write**
 - Metadata: Read (selected automatically)

@@ -57,7 +57,7 @@ jobs:
             ref="${GITHUB_REF_NAME}"
           fi
           repo="${{ vars.PROTOGEN_REPO }}"
-          repo="${repo:-huponx/x-protogen}"
+          repo="${repo:-huponx/protogen}"
           echo "proto_ref=${ref}" >> "${GITHUB_OUTPUT}"
           echo "target_repo=${repo}" >> "${GITHUB_OUTPUT}"
       - name: Dispatch protogen

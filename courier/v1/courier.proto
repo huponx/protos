@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package courier.v1;
 
-option go_package = "github.com/huponx/x-protogen/courier/v1;courierv1";
+option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
 
 service CourierService {
   rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
