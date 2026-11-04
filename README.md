@@ -13,8 +13,8 @@ Add a new API by adding `bill/v1/bill.proto` here — do not create a new repo.
 `buf lint` + `buf build` check that `.proto` files parse and follow [lint](buf.yaml). `buf breaking` compares against the previous semver tag (`FILE` rules). Skipped on the first tag, and when **Run workflow** uses bump `major`.
 
 ```bash
-bash proto/scripts/verify.sh
-# optional: BUF_BREAKING_AGAINST='.git#tag=v0.1.0' bash proto/scripts/verify.sh
+bash protos/scripts/verify.sh
+# optional: BUF_BREAKING_AGAINST='.git#tag=v0.1.0' bash protos/scripts/verify.sh
 ```
 
 ## Versioning
@@ -45,7 +45,7 @@ Generate with [`buf.gen.yaml`](buf.gen.yaml) and [`scripts/generate.sh`](scripts
 
 ```bash
 make generate
-# or: PROTO_DIR=proto PROTOGEN_DIR=protogen bash proto/scripts/generate.sh
+# or: PROTO_DIR=protos PROTOGEN_DIR=protogen bash protos/scripts/generate.sh
 ```
 
 To add a language: enable a plugin in `buf.gen.yaml`. The `protogen` workflow only needs extra tool setup and `git add` if required.
