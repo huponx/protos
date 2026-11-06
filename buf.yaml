@@ -1,12 +1,13 @@
-version: v1
+version: v2
+modules:
+  - path: .
 lint:
   use:
     - STANDARD
 breaking:
   use:
     - FILE
-  # Allow removing a .proto (stubs are deleted on generate). Field/RPC
-  # removals inside a remaining file are still breaking.
   except:
-    - FILE_NO_DELETE
-    - RESERVED_MESSAGE_NO_DELETE
+    # go_package is rewritten by managed mode in buf.gen.go.yaml and never
+    # affects wire compatibility; changing the Go module path must not count as breaking.
+    - FILE_SAME_GO_PACKAGE

@@ -1,0 +1,17 @@
+version: v2
+# Rendered by scripts/lib.sh (envsubst): GO_MODULE and GO_DIR.
+#   major 0/1: GO_MODULE=github.com/huponx/protogen/go     GO_DIR=go
+#   major >=2: GO_MODULE=github.com/huponx/protogen/go/vN  GO_DIR=go/vN
+# out: is relative to the protogen repo root (cwd at generate time).
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: ${GO_MODULE}
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.6
+    out: ${GO_DIR}
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go:v1.5.1
+    out: ${GO_DIR}
+    opt: paths=source_relative
