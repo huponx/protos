@@ -114,7 +114,7 @@ Go requires a `/vN` suffix from major 2 on. The workflow handles it from the maj
 
 ### Scala
 
-ScalaPB has no remote plugin on buf.build. `protoc-gen-scala` must be on `PATH`; [`scripts/install-scalapb.sh`](scripts/install-scalapb.sh) installs it with coursier (`cs`). CI does this itself.
+ScalaPB has no remote plugin on buf.build. `protoc-gen-scala` must be on `PATH`; [`scripts/install-scalapb.sh`](scripts/install-scalapb.sh) downloads the self-contained executable from Maven Central (needs `curl` and a JDK). CI does this itself.
 
 ### Add a language
 
