@@ -1,0 +1,13 @@
+version: v2
+# out: is relative to the protogen repo root (cwd at generate time).
+# Plugin versions are pinned: v0.4.x generates code for prost 0.13 / tonic 0.12
+# (see protogen/rust/Cargo.toml). Bump plugins and Cargo.toml together.
+# prost-crate generates src/gen/mod.rs that wires every generated file.
+plugins:
+  - remote: buf.build/community/neoeinstein-prost:v0.4.0
+    out: rust/src/gen
+  - remote: buf.build/community/neoeinstein-tonic:v0.4.1
+    out: rust/src/gen
+  - remote: buf.build/community/neoeinstein-prost-crate:v0.4.1
+    out: rust/src/gen
+    opt: no_features

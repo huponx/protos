@@ -1,0 +1,10 @@
+version: v2
+# ScalaPB has no remote plugin on the BSR, so protoc-gen-scala must be on PATH.
+# Install with coursier (see scripts/install-scalapb.sh).
+# out: is relative to the protogen repo root (cwd at generate time).
+plugins:
+  - local: protoc-gen-scala
+    out: scala/src/main/scala
+    opt:
+      - grpc
+      - flat_package
