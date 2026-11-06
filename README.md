@@ -315,6 +315,7 @@ gh api repos/$PROTOS/rulesets --method POST --input tag-ruleset.json
 | stubs PR sits at "Expected - waiting for status" | PR was opened with `GITHUB_TOKEN`; `BOT_TOKEN` is missing or invalid in `protogen` |
 | merge to `main` of `protos` does not start `ci.yml` | auto-merge was enabled with `GITHUB_TOKEN`; set `BOT_TOKEN` |
 | `Resource not accessible by integration` on tag/PR | token missing Contents or Pull requests write on that repo |
+| Scala fails with `illegal cyclic reference involving method ping` | top-level Scala package equals an rpc method name; `buf.gen.scala.yaml` prefixes packages with `com.huponx.protogen` via managed mode |
 | tag push rejected | tag ruleset without the bypass actor for the token owner |
 | `resource_exhausted` from buf | anonymous BSR rate limit; set `BUF_TOKEN` |
 | generate fails: cannot read `protos` | private repo without `PROTO_READ_TOKEN` in `protogen` |
