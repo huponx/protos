@@ -2,6 +2,15 @@ version: v2
 # ScalaPB has no remote plugin on the BSR, so protoc-gen-scala must be on PATH.
 # Install with scripts/install-scalapb.sh (downloads the executable from Maven Central).
 # out: is relative to the protogen repo root (cwd at generate time).
+#
+# Managed mode puts the stubs under com.huponx.protogen.<proto package>. Without a
+# prefix the top-level Scala package would be `ping`, which collides with the rpc method
+# `ping` inside the generated service trait ("illegal cyclic reference").
+managed:
+  enabled: true
+  override:
+    - file_option: java_package_prefix
+      value: com.huponx.protogen
 plugins:
   - local: protoc-gen-scala
     out: scala/src/main/scala
