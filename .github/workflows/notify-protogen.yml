@@ -1,10 +1,12 @@
 name: Notify protogen
 
+# Dispatches protogen's generate.yml for a released tag and waits for the result.
+# Called by ci.yml after a release; can also be run by hand to re-notify a tag.
 on:
   workflow_call:
     inputs:
       proto_ref:
-        description: Tag or SHA of this proto repo to generate
+        description: Release tag of this proto repo to generate (vX.Y.Z)
         required: true
         type: string
     outputs:
@@ -17,19 +19,15 @@ on:
       generate_release_url:
         description: Protogen GitHub Release URL
         value: ${{ jobs.notify.outputs.generate_release_url }}
-  push:
-    tags:
-      - "v*.*.*"
-    paths-ignore:
-      - '**/README.md'
-      - '**/notify-protogen.yml'
-      - '**/verify-release.yml'
+      failed_langs:
+        description: Comma separated languages that failed to generate
+        value: ${{ jobs.notify.outputs.failed_langs }}
   workflow_dispatch:
     inputs:
       proto_ref:
-        description: Tag or SHA of this proto repo to generate
-        required: false
-        default: ""
+        description: Release tag of this proto repo to generate (vX.Y.Z)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -37,65 +35,81 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Covers 4 language builds plus waiting for the protogen PR to automerge.
+    timeout-minutes: 90
     outputs:
       proto_ref: ${{ steps.meta.outputs.proto_ref }}
-      proto_repo: ${{ github.repository }}
       target_repo: ${{ steps.meta.outputs.target_repo }}
       dispatched: ${{ steps.dispatch.outputs.dispatched }}
       generate_conclusion: ${{ steps.wait.outputs.conclusion }}
       generate_url: ${{ steps.wait.outputs.url }}
       generate_release_url: ${{ steps.wait.outputs.release_url }}
+      failed_langs: ${{ steps.wait.outputs.failed_langs }}
     steps:
       - name: Resolve refs
         id: meta
-        run: |
-          set -euo pipefail
-          if [ -n "${{ inputs.proto_ref }}" ]; then
-            ref="${{ inputs.proto_ref }}"
-          else
-            ref="${GITHUB_REF_NAME}"
-          fi
-          repo="${{ vars.PROTOGEN_REPO }}"
-          repo="${repo:-huponx/protogen}"
-          echo "proto_ref=${ref}" >> "${GITHUB_OUTPUT}"
-          echo "target_repo=${repo}" >> "${GITHUB_OUTPUT}"
-      - name: Dispatch protogen
-        id: dispatch
         env:
-          GH_TOKEN: ${{ secrets.PROTOGEN_DISPATCH_TOKEN }}
+          PROTO_REF: ${{ inputs.proto_ref }}
+          PROTOGEN_REPO_VAR: ${{ vars.PROTOGEN_REPO }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "PROTOGEN_DISPATCH_TOKEN is not set" >&2
-            echo "dispatched=false" >> "${GITHUB_OUTPUT}"
+          if ! [[ "${PROTO_REF}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::proto_ref '${PROTO_REF}' must be a release tag like v1.2.3"
             exit 1
           fi
-          gh api "repos/${{ steps.meta.outputs.target_repo }}/dispatches" \
-            -f event_type=proto_release \
-            -F "client_payload[proto_ref]=${{ steps.meta.outputs.proto_ref }}" \
-            -F "client_payload[proto_repo]=${GITHUB_REPOSITORY}" \
-            -F "client_payload[proto_sha]=${GITHUB_SHA}"
-          echo "dispatched=true" >> "${GITHUB_OUTPUT}"
-      - name: Wait for protogen generate
-        id: wait
+          repo="${PROTOGEN_REPO_VAR:-huponx/protogen}"
+          {
+            echo "proto_ref=${PROTO_REF}"
+            echo "target_repo=${repo}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Dispatch protogen
+        id: dispatch
         env:
           GH_TOKEN: ${{ secrets.PROTOGEN_DISPATCH_TOKEN }}
           TARGET: ${{ steps.meta.outputs.target_repo }}
           PROTO_REF: ${{ steps.meta.outputs.proto_ref }}
         run: |
           set -euo pipefail
-          echo "conclusion=" >> "${GITHUB_OUTPUT}"
-          echo "url=" >> "${GITHUB_OUTPUT}"
-          echo "run_id=" >> "${GITHUB_OUTPUT}"
-          echo "release_url=" >> "${GITHUB_OUTPUT}"
+          echo "dispatched=false" >> "${GITHUB_OUTPUT}"
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::PROTOGEN_DISPATCH_TOKEN is not set"
+            exit 1
+          fi
+          # Remember when we dispatched so we only match runs created after it.
+          since="$(date -u -d '15 seconds ago' +%Y-%m-%dT%H:%M:%SZ)"
+          echo "since=${since}" >> "${GITHUB_OUTPUT}"
+          gh api "repos/${TARGET}/dispatches" \
+            -f event_type=proto_release \
+            -F "client_payload[proto_ref]=${PROTO_REF}" \
+            -F "client_payload[proto_repo]=${GITHUB_REPOSITORY}" \
+            -F "client_payload[proto_sha]=${GITHUB_SHA}"
+          echo "dispatched=true" >> "${GITHUB_OUTPUT}"
 
+      - name: Wait for protogen generate
+        id: wait
+        env:
+          GH_TOKEN: ${{ secrets.PROTOGEN_DISPATCH_TOKEN }}
+          TARGET: ${{ steps.meta.outputs.target_repo }}
+          PROTO_REF: ${{ steps.meta.outputs.proto_ref }}
+          SINCE: ${{ steps.dispatch.outputs.since }}
+        run: |
+          set -euo pipefail
+          {
+            echo "conclusion="
+            echo "url="
+            echo "run_id="
+            echo "release_url="
+            echo "failed_langs="
+          } >> "${GITHUB_OUTPUT}"
+
+          # Exact match on the run title ("Generate <ref>") and creation time.
           run_id=""
           for _ in $(seq 1 24); do
             run_id="$(
-              gh run list --repo "${TARGET}" --workflow generate.yml --limit 20 \
-                --json databaseId,displayTitle,event \
-                --jq '[.[] | select(.event == "repository_dispatch") | select(.displayTitle | contains(env.PROTO_REF))][0].databaseId // empty'
+              gh run list --repo "${TARGET}" --workflow generate.yml --event repository_dispatch --limit 30 \
+                --json databaseId,displayTitle,createdAt \
+                --jq '[.[] | select(.displayTitle == ("Generate " + env.PROTO_REF)) | select(.createdAt >= env.SINCE)] | sort_by(.createdAt) | last | .databaseId // empty'
             )"
             if [ -n "${run_id}" ]; then
               break
@@ -104,7 +118,7 @@ jobs:
           done
 
           if [ -z "${run_id}" ]; then
-            echo "No protogen generate run found for ${PROTO_REF} (need Actions: Read on PROTOGEN_DISPATCH_TOKEN)" >&2
+            echo "::error::No protogen generate run found for ${PROTO_REF} (PROTOGEN_DISPATCH_TOKEN needs Actions: Read)"
             exit 1
           fi
 
@@ -114,34 +128,73 @@ jobs:
           echo "Watching ${url}"
 
           set +e
-          gh run watch "${run_id}" --repo "${TARGET}" --exit-status
+          gh run watch "${run_id}" --repo "${TARGET}" --interval 20 --exit-status > /dev/null
           watch_rc=$?
           set -e
 
           conclusion="$(gh run view "${run_id}" --repo "${TARGET}" --json conclusion --jq .conclusion)"
           echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
-          release_url="$(gh release view "${PROTO_REF}" --repo "${TARGET}" --json url --jq .url || true)"
-          echo "release_url=${release_url}" >> "${GITHUB_OUTPUT}"
+
+          # protogen's publish job uploads result.json (per-language status).
+          release_url=""
+          failed=""
+          rm -rf result
+          if gh run download "${run_id}" --repo "${TARGET}" -n result -D result 2>/dev/null && [ -f result/result.json ]; then
+            release_url="$(jq -r '.release_url // ""' result/result.json)"
+            failed="$(jq -r '[.langs | to_entries[] | select(.value.status != "success" and .value.status != "exists") | .key] | join(",")' result/result.json)"
+            jq -r '.langs | to_entries[] | "\(.key): \(.value.status) \(.value.note // "")"' result/result.json
+          fi
+          if [ -z "${release_url}" ]; then
+            release_url="$(gh release view "${PROTO_REF}" --repo "${TARGET}" --json url --jq .url 2>/dev/null || true)"
+          fi
+          {
+            echo "release_url=${release_url}"
+            echo "failed_langs=${failed}"
+          } >> "${GITHUB_OUTPUT}"
+
           echo "Protogen generate: ${conclusion}"
+          echo "Failed languages: ${failed:-none}"
           echo "Protogen release: ${release_url:-none}"
+          if [ -n "${failed}" ]; then
+            echo "::error::protogen failed to generate: ${failed}"
+          fi
           exit "${watch_rc}"
 
       - name: Summary
         if: always()
+        env:
+          RESULT: ${{ job.status }}
+          EVENT: ${{ github.event_name }}
+          PROTO_REF: ${{ steps.meta.outputs.proto_ref }}
+          TARGET: ${{ steps.meta.outputs.target_repo }}
+          DISPATCHED: ${{ steps.dispatch.outputs.dispatched }}
+          CONCLUSION: ${{ steps.wait.outputs.conclusion }}
+          RUN_URL: ${{ steps.wait.outputs.url }}
+          RELEASE_URL: ${{ steps.wait.outputs.release_url }}
+          FAILED: ${{ steps.wait.outputs.failed_langs }}
         run: |
           {
             echo "## Notify protogen"
             echo ""
+            if [ "${RESULT}" = "cancelled" ]; then
+              echo "> **Timed out or cancelled.** protogen may still be running; check the generate run below."
+              echo ""
+            fi
+            if [ -n "${FAILED}" ]; then
+              echo "> **Failed languages: ${FAILED}** (no tag was created for them)"
+              echo ""
+            fi
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| Result | ${{ job.status }} |"
-            echo "| proto_ref | \`${{ steps.meta.outputs.proto_ref }}\` |"
+            echo "| Result | ${RESULT} |"
+            echo "| proto_ref | \`${PROTO_REF}\` |"
             echo "| proto_repo | \`${GITHUB_REPOSITORY}\` |"
             echo "| proto SHA | \`${GITHUB_SHA:0:7}\` |"
-            echo "| Target | \`${{ steps.meta.outputs.target_repo }}\` |"
-            echo "| Dispatched | ${{ steps.dispatch.outputs.dispatched || 'false' }} |"
-            echo "| Generate | ${{ steps.wait.outputs.conclusion || '—' }} |"
-            echo "| Generate run | ${{ steps.wait.outputs.url || '—' }} |"
-            echo "| Release | ${{ steps.wait.outputs.release_url || '—' }} |"
-            echo "| Event | ${{ github.event_name }} |"
+            echo "| Target | \`${TARGET}\` |"
+            echo "| Dispatched | ${DISPATCHED:-false} |"
+            echo "| Generate | ${CONCLUSION:-—} |"
+            echo "| Failed languages | ${FAILED:-none} |"
+            echo "| Generate run | ${RUN_URL:-—} |"
+            echo "| Release | ${RELEASE_URL:-—} |"
+            echo "| Event | ${EVENT} |"
           } >> "${GITHUB_STEP_SUMMARY}"

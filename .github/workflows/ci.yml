@@ -1,0 +1,257 @@
+name: CI
+
+# PR to main        -> verify
+# push to main      -> verify, then (if verify passes) tag a release and
+#                      notify protogen, which generates the stubs
+# Run workflow      -> same as push, with a chosen bump (patch/minor/major)
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semver component to increment (major skips the breaking check)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep in sync with protogen/.github/workflows/*.yml. Bump in its own PR.
+  BUF_VERSION: "1.75.0"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      breaking: ${{ steps.verify.outputs.breaking }}
+      skip_release: ${{ steps.gate.outputs.skip_release }}
+      reason: ${{ steps.gate.outputs.reason }}
+      latest_tag: ${{ steps.ctx.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+          version: ${{ env.BUF_VERSION }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+
+      # ScalaPB has no remote plugin on the BSR: install protoc-gen-scala.
+      - uses: coursier/setup-action@v1
+        with:
+          jvm: temurin:17
+
+      - name: Install protoc-gen-scala
+        run: |
+          set -euo pipefail
+          bash scripts/install-scalapb.sh "${HOME}/.local/bin"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Context (latest tag, breaking-change label)
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          BUMP_INPUT: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          latest="$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1 || true)"
+          echo "latest_tag=${latest}" >> "${GITHUB_OUTPUT}"
+
+          ack=false
+          if [ "${EVENT}" = "pull_request" ]; then
+            if echo "${PR_LABELS}" | jq -e 'index("breaking-change")' >/dev/null; then
+              ack=true
+            fi
+          elif [ "${EVENT}" = "push" ]; then
+            # Merged PR(s) of this commit: the label was set on the PR.
+            if gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+                 --jq '.[].labels[].name' | grep -qx 'breaking-change'; then
+              ack=true
+            fi
+          fi
+          echo "ack=${ack}" >> "${GITHUB_OUTPUT}"
+
+          # Manual major release skips the breaking check on purpose.
+          against=""
+          if [ -n "${latest}" ] && ! { [ "${EVENT}" = "workflow_dispatch" ] && [ "${BUMP_INPUT}" = "major" ]; }; then
+            against=".git#tag=${latest}"
+          fi
+          echo "against=${against}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify
+        id: verify
+        env:
+          BUF_BREAKING_AGAINST: ${{ steps.ctx.outputs.against }}
+          BREAKING_ACK: ${{ steps.ctx.outputs.ack }}
+          PROTO_REF: ${{ steps.ctx.outputs.latest_tag }}
+          VERIFY_GO_BUILD: "1"
+        run: bash scripts/verify.sh
+
+      - name: Release gate
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          echo "skip_release=false" >> "${GITHUB_OUTPUT}"
+
+          if [ "${EVENT}" = "pull_request" ]; then
+            echo "skip_release=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=pull_request" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          existing="$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          if [ -n "${existing}" ]; then
+            echo "skip_release=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=head_already_tagged" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ "${EVENT}" = "push" ]; then
+            if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+              pattern='(^|/)[^/]+\.proto$|^buf\.yaml$|^buf\.gen\.[a-z]+\.yaml$|^scripts/(generate|lib)\.sh$'
+              if ! git diff --name-only "${BEFORE}" "${GITHUB_SHA}" | grep -Eq "${pattern}"; then
+                echo "skip_release=true" >> "${GITHUB_OUTPUT}"
+                echo "reason=no_contract_changes" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "reason=release" >> "${GITHUB_OUTPUT}"
+
+      - name: Summary
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## Verify proto"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | ${RESULT} |"
+            echo "| Breaking changes | ${{ steps.verify.outputs.breaking || 'n/a' }} (label: ${{ steps.ctx.outputs.ack || 'n/a' }}) |"
+            echo "| Compared against | \`${{ steps.ctx.outputs.latest_tag || 'none' }}\` |"
+            echo "| Release | ${{ steps.gate.outputs.skip_release == 'true' && 'skipped' || 'will tag' }} |"
+            echo "| Reason | ${{ steps.gate.outputs.reason || 'n/a' }} |"
+            echo "| Event | ${{ github.event_name }} |"
+            echo "| Commit | \`${GITHUB_SHA:0:7}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  release:
+    needs: verify
+    if: github.event_name != 'pull_request' && needs.verify.outputs.skip_release != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+      release_url: ${{ steps.bump.outputs.release_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Create tag
+        id: bump
+        env:
+          # BOT_TOKEN lets tag rulesets allow the bot; falls back to GITHUB_TOKEN.
+          GH_TOKEN: ${{ secrets.BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          BUMP_INPUT: ${{ inputs.bump }}
+          BREAKING: ${{ needs.verify.outputs.breaking }}
+        run: |
+          set -euo pipefail
+
+          # patch by default, minor for acknowledged breaking changes,
+          # major only when chosen by hand (Run workflow).
+          bump="patch"
+          if [ "${BREAKING}" = "true" ]; then
+            bump="minor"
+          fi
+          if [ "${EVENT}" = "workflow_dispatch" ]; then
+            bump="${BUMP_INPUT}"
+          fi
+
+          latest="$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1 || true)"
+          if [ -z "${latest}" ]; then
+            tag="v0.1.0"
+          else
+            ver="${latest#v}"
+            major="${ver%%.*}"
+            rest="${ver#*.}"
+            minor="${rest%%.*}"
+            patch="${rest#*.}"
+            case "${bump}" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+              *) echo "unknown bump: ${bump}" >&2; exit 1 ;;
+            esac
+            tag="v${major}.${minor}.${patch}"
+          fi
+
+          echo "Creating ${tag} (bump=${bump}, previous=${latest:-none})"
+          url="$(gh release create "${tag}" --generate-notes --target "${GITHUB_SHA}")"
+          {
+            echo "tag=${tag}"
+            echo "previous=${latest:-none}"
+            echo "bump=${bump}"
+            echo "release_url=${url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Proto release"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Result | ${{ job.status }} |"
+            echo "| Tag | \`${{ steps.bump.outputs.tag }}\` |"
+            echo "| Previous | \`${{ steps.bump.outputs.previous }}\` |"
+            echo "| Bump | ${{ steps.bump.outputs.bump }} |"
+            echo "| URL | ${{ steps.bump.outputs.release_url || '—' }} |"
+            echo "| Next | notify job (protogen generate) |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/notify-protogen.yml
+    with:
+      proto_ref: ${{ needs.release.outputs.tag }}
+    secrets: inherit

@@ -1,0 +1,39 @@
+name: Automerge
+
+# Label a PR with `automerge` to merge it automatically once required checks pass.
+# BOT_TOKEN (PAT or GitHub App token) is required: merges and PRs made with
+# GITHUB_TOKEN do not trigger other workflows (CI on main would never run).
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require BOT_TOKEN
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          if [ -z "${BOT_TOKEN}" ]; then
+            echo "::error::secret BOT_TOKEN is not set"
+            exit 1
+          fi
+
+      - name: Enable auto-merge
+        if: contains(github.event.pull_request.labels.*.name, 'automerge')
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "${PR_URL}"
+
+      - name: Disable auto-merge
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'automerge') }}
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --disable-auto "${PR_URL}" || true
