@@ -7,3 +7,7 @@ lint:
 breaking:
   use:
     - FILE
+  except:
+    # go_package is rewritten by managed mode in buf.gen.go.yaml and never
+    # affects wire compatibility; changing the Go module path must not count as breaking.
+    - FILE_SAME_GO_PACKAGE
