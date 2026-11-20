@@ -1,0 +1,313 @@
+syntax = "proto3";
+
+package identity.v1;
+
+option go_package = "github.com/huponx/protogen/identity/v1;identityv1";
+
+// IdentityService is the internal administration API of identity. The OAuth 2.0 and OpenID
+// Connect endpoints (authorize, token, revoke, userinfo, JWKS) are HTTP and are not part of
+// this contract. Every method needs a permission, see the comment of the method.
+service IdentityService {
+  // Introspect reports whether an access token is active (RFC 7662). Permission: identity:token:read.
+  rpc Introspect(IntrospectRequest) returns (IntrospectResponse);
+  // CheckPermission reports whether a user holds a permission. Permission: identity:permission:read.
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  // RevokeToken revokes an access token by jti. Permission: identity:token:write.
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+
+  // Users. Permission: identity:user:read for Get and List, identity:user:write for the others.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc SetUserDisabled(SetUserDisabledRequest) returns (SetUserDisabledResponse);
+  rpc SetUserPassword(SetUserPasswordRequest) returns (SetUserPasswordResponse);
+  rpc SendPasswordReset(SendPasswordResetRequest) returns (SendPasswordResetResponse);
+
+  // Roles. Permission: identity:role:read for List, identity:role:write for the others.
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
+  rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse);
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
+
+  // Clients. Permission: identity:client:read for List, identity:client:write for the others.
+  rpc CreateClient(CreateClientRequest) returns (CreateClientResponse);
+  rpc RotateClientSecret(RotateClientSecretRequest) returns (RotateClientSecretResponse);
+  rpc ListClients(ListClientsRequest) returns (ListClientsResponse);
+
+  // Token exchange policies (deny by default). Permission: identity:exchange:read for List,
+  // identity:exchange:write for Set.
+  rpc SetExchangePolicy(SetExchangePolicyRequest) returns (SetExchangePolicyResponse);
+  rpc ListExchangePolicies(ListExchangePoliciesRequest) returns (ListExchangePoliciesResponse);
+
+  // Multi-factor authentication. Permission: identity:mfa:read for Get, identity:mfa:write for the others.
+  rpc GetUserMFA(GetUserMFARequest) returns (GetUserMFAResponse);
+  rpc SetUserMFA(SetUserMFARequest) returns (SetUserMFAResponse);
+  rpc EnforceUserMFA(EnforceUserMFARequest) returns (EnforceUserMFAResponse);
+  rpc ResetUserMFA(ResetUserMFARequest) returns (ResetUserMFAResponse);
+}
+
+// ---- tokens ----
+
+message IntrospectRequest {
+  string token = 10;
+}
+
+message IntrospectResponse {
+  bool active = 10;
+  string sub = 20;
+  string client_id = 30;
+  string scope = 40;
+  repeated string aud = 50;
+  string jti = 60;
+  int64 exp = 70;
+  // Actor chain of an exchanged token, most recent first.
+  repeated string act = 80;
+}
+
+message CheckPermissionRequest {
+  string user_id = 10;
+  string permission = 20;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 10;
+}
+
+message RevokeTokenRequest {
+  string jti = 10;
+  // Seconds the denylist entry must live: the remaining life of the token.
+  int64 ttl_seconds = 20;
+}
+
+message RevokeTokenResponse {}
+
+// ---- users ----
+
+message User {
+  string id = 10;
+  string email = 20;
+  string name = 30;
+  string locale = 40;
+  bool disabled = 50;
+  repeated string roles = 60;
+  bool mfa_enabled = 70;
+  bool mfa_enforced = 80;
+  int64 created_at = 90;
+}
+
+message GetUserRequest {
+  // One of the two.
+  string id = 10;
+  string email = 20;
+}
+
+message GetUserResponse {
+  User user = 10;
+}
+
+message ListUsersRequest {
+  // Users whose email starts with this text (case insensitive). Empty lists everyone.
+  string query = 10;
+  // Default 50, at most 200.
+  int32 page_size = 20;
+  // The next_page_token of the previous page. Users are ordered by email.
+  string page_token = 30;
+}
+
+message ListUsersResponse {
+  repeated User users = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
+}
+
+message CreateUserRequest {
+  string email = 10;
+  string name = 20;
+  string locale = 30;
+  // Empty: the user sets the password through the password reset flow.
+  string password = 40;
+  repeated string roles = 50;
+}
+
+message CreateUserResponse {
+  User user = 10;
+}
+
+message SetUserDisabledRequest {
+  string user_id = 10;
+  bool disabled = 20;
+}
+
+message SetUserDisabledResponse {}
+
+message SetUserPasswordRequest {
+  string user_id = 10;
+  string password = 20;
+}
+
+message SetUserPasswordResponse {}
+
+message SendPasswordResetRequest {
+  string user_id = 10;
+}
+
+message SendPasswordResetResponse {}
+
+// ---- roles ----
+
+message Role {
+  string name = 10;
+  string description = 20;
+  // Permissions are colon separated segments ("identity:user:read"); "*" is a wildcard (alone: everything, trailing: one or more segments, elsewhere: one segment).
+  repeated string permissions = 30;
+}
+
+message CreateRoleRequest {
+  Role role = 10;
+}
+
+message CreateRoleResponse {
+  Role role = 10;
+}
+
+message SetRolePermissionsRequest {
+  string role = 10;
+  repeated string permissions = 20;
+}
+
+message SetRolePermissionsResponse {
+  Role role = 10;
+}
+
+message ListRolesRequest {}
+
+message ListRolesResponse {
+  repeated Role roles = 10;
+}
+
+message AssignRoleRequest {
+  // Exactly one of the two.
+  string user_id = 10;
+  string client_id = 20;
+  string role = 30;
+}
+
+message AssignRoleResponse {}
+
+message RevokeRoleRequest {
+  string user_id = 10;
+  string client_id = 20;
+  string role = 30;
+}
+
+message RevokeRoleResponse {}
+
+// ---- clients ----
+
+enum ClientType {
+  CLIENT_TYPE_UNSPECIFIED = 0;
+  CLIENT_TYPE_PUBLIC = 10;
+  CLIENT_TYPE_CONFIDENTIAL = 20;
+}
+
+message Client {
+  string client_id = 10;
+  string name = 20;
+  ClientType type = 30;
+  repeated string redirect_uris = 40;
+  repeated string post_logout_redirect_uris = 50;
+  string backchannel_logout_uri = 60;
+  repeated string allowed_grants = 70;
+  repeated string allowed_scopes = 80;
+  // Default audience of the tokens issued to this client.
+  string resource = 90;
+  repeated string roles = 100;
+}
+
+message CreateClientRequest {
+  Client client = 10;
+}
+
+message CreateClientResponse {
+  Client client = 10;
+  // Shown once; empty for a public client.
+  string client_secret = 20;
+}
+
+message RotateClientSecretRequest {
+  string client_id = 10;
+}
+
+message RotateClientSecretResponse {
+  // Shown once.
+  string client_secret = 10;
+}
+
+message ListClientsRequest {}
+
+message ListClientsResponse {
+  repeated Client clients = 10;
+}
+
+// ---- token exchange ----
+
+message ExchangePolicy {
+  string client_id = 10;
+  string audience = 20;
+  // Space separated scopes the exchanged token may carry at most.
+  string max_scope = 30;
+  // How many "act" levels the resulting token may have (default 1).
+  int32 max_chain_depth = 40;
+}
+
+message SetExchangePolicyRequest {
+  ExchangePolicy policy = 10;
+  // True removes the policy of (client_id, audience).
+  bool delete = 20;
+}
+
+message SetExchangePolicyResponse {}
+
+message ListExchangePoliciesRequest {
+  string client_id = 10;
+}
+
+message ListExchangePoliciesResponse {
+  repeated ExchangePolicy policies = 10;
+}
+
+// ---- MFA ----
+
+message GetUserMFARequest {
+  string user_id = 10;
+}
+
+message GetUserMFAResponse {
+  bool enabled = 10;
+  bool enforced = 20;
+  // The server mode: off, optional or required.
+  string mode = 30;
+  int32 recovery_codes_left = 40;
+}
+
+message SetUserMFARequest {
+  string user_id = 10;
+  // False turns MFA off for the user (refused when enforced or mode is required).
+  bool enabled = 20;
+}
+
+message SetUserMFAResponse {}
+
+message EnforceUserMFARequest {
+  string user_id = 10;
+  bool enforced = 20;
+}
+
+message EnforceUserMFAResponse {}
+
+message ResetUserMFARequest {
+  string user_id = 10;
+}
+
+message ResetUserMFAResponse {}
