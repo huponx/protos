@@ -22,16 +22,45 @@ service IdentityService {
   rpc SetUserDisabled(SetUserDisabledRequest) returns (SetUserDisabledResponse);
   rpc SetUserPassword(SetUserPasswordRequest) returns (SetUserPasswordResponse);
   rpc SendPasswordReset(SendPasswordResetRequest) returns (SendPasswordResetResponse);
+  // UpdateUser changes the name and the locale. SetUserAvatar stores (or clears) the picture.
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc SetUserAvatar(SetUserAvatarRequest) returns (SetUserAvatarResponse);
+  // SendWelcome (re)sends the welcome mail with a link to set the first password. Only for a
+  // user who has no password yet (status PENDING).
+  rpc SendWelcome(SendWelcomeRequest) returns (SendWelcomeResponse);
+
+  // Counts of users by status, MFA and activity.
+  rpc GetUserStats(GetUserStatsRequest) returns (GetUserStatsResponse);
+
+  // The signed-in user's own profile. Any user with a user token may call them (no permission):
+  // the user is the subject of the token, never a field of the request, so nobody can reach
+  // another user through them. Service tokens are refused.
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  // UpdateMe changes the own name and locale; an empty field keeps the current value.
+  rpc UpdateMe(UpdateMeRequest) returns (UpdateMeResponse);
+  rpc SetMyAvatar(SetMyAvatarRequest) returns (SetMyAvatarResponse);
 
   // Roles. Permission: identity:role:read for List, identity:role:write for the others.
   rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
   rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse);
   rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
+  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
+  // The catalog of permissions roles can be given (wildcards are entries too).
+  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+  rpc CreatePermission(CreatePermissionRequest) returns (CreatePermissionResponse);
+  // UpdatePermission changes the description; the name is the key.
+  rpc UpdatePermission(UpdatePermissionRequest) returns (UpdatePermissionResponse);
+  // DeletePermission fails while a role holds the permission.
+  rpc DeletePermission(DeletePermissionRequest) returns (DeletePermissionResponse);
   rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
   rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
 
   // Clients. Permission: identity:client:read for List, identity:client:write for the others.
   rpc CreateClient(CreateClientRequest) returns (CreateClientResponse);
+  rpc UpdateClient(UpdateClientRequest) returns (UpdateClientResponse);
+  rpc SetClientDisabled(SetClientDisabledRequest) returns (SetClientDisabledResponse);
+  rpc DeleteClient(DeleteClientRequest) returns (DeleteClientResponse);
   rpc RotateClientSecret(RotateClientSecretRequest) returns (RotateClientSecretResponse);
   rpc ListClients(ListClientsRequest) returns (ListClientsResponse);
 
@@ -84,6 +113,15 @@ message RevokeTokenResponse {}
 
 // ---- users ----
 
+// UserStatus is derived: DISABLED when the account is disabled, PENDING until the user has set
+// a password (a new user must do it through the welcome mail), ACTIVE otherwise.
+enum UserStatus {
+  USER_STATUS_UNSPECIFIED = 0;
+  USER_STATUS_PENDING = 10;
+  USER_STATUS_ACTIVE = 20;
+  USER_STATUS_DISABLED = 30;
+}
+
 message User {
   string id = 10;
   string email = 20;
@@ -94,12 +132,41 @@ message User {
   bool mfa_enabled = 70;
   bool mfa_enforced = 80;
   int64 created_at = 90;
+  UserStatus status = 100;
+  // light, dark or system; empty until the user chose one.
+  string theme = 140;
+  bool has_avatar = 110;
+  // The picture as a data URI ("data:image/webp;base64,..."). Only GetUser fills it, lists do not.
+  string avatar = 120;
+  // Unix seconds of the last completed sign in; 0 when the user never signed in (or did before this was tracked).
+  int64 last_login_at = 130;
+}
+
+message GetUserStatsRequest {}
+
+// Counts over all users.
+message GetUserStatsResponse {
+  int64 total = 10;
+  int64 active = 20;
+  // Created, the password is not set yet.
+  int64 pending = 30;
+  int64 disabled = 40;
+  int64 mfa_enabled = 50;
+  int64 mfa_enforced = 60;
+  int64 with_avatar = 70;
+  // Signed in during the last 30 days.
+  int64 signed_in_30d = 80;
+  // Never signed in (or only before sign ins were tracked).
+  int64 never_signed_in = 90;
+  // Created since the start of this month (UTC).
+  int64 created_this_month = 100;
 }
 
 message GetUserRequest {
-  // One of the two.
+  // One of id, user_id (same as id, the name of the path parameter of the gateway) and email.
   string id = 10;
   string email = 20;
+  string user_id = 30;
 }
 
 message GetUserResponse {
@@ -113,6 +180,12 @@ message ListUsersRequest {
   int32 page_size = 20;
   // The next_page_token of the previous page. Users are ordered by email.
   string page_token = 30;
+  // Users whose name contains this text (case insensitive).
+  string name = 40;
+  // Only users with this status; UNSPECIFIED means any.
+  UserStatus status = 50;
+  // Only users who have this role.
+  string role = 60;
 }
 
 message ListUsersResponse {
@@ -128,6 +201,8 @@ message CreateUserRequest {
   // Empty: the user sets the password through the password reset flow.
   string password = 40;
   repeated string roles = 50;
+  // Send the welcome mail with the link to set the password (only when password is empty).
+  bool send_welcome = 60;
 }
 
 message CreateUserResponse {
@@ -154,6 +229,58 @@ message SendPasswordResetRequest {
 
 message SendPasswordResetResponse {}
 
+message UpdateUserRequest {
+  string user_id = 10;
+  string name = 20;
+  // Empty keeps the current locale.
+  string locale = 30;
+}
+
+message UpdateUserResponse {
+  User user = 10;
+}
+
+message SetUserAvatarRequest {
+  string user_id = 10;
+  // The encoded image (png, jpeg or webp, at most 64 KiB, at most 512x512). Empty removes the picture.
+  bytes image = 20;
+  string mime_type = 30;
+}
+
+message SetUserAvatarResponse {}
+
+message SendWelcomeRequest {
+  string user_id = 10;
+}
+
+message SendWelcomeResponse {}
+
+message GetMeRequest {}
+
+// GetMeResponse carries the picture as a data URI, like GetUser.
+message GetMeResponse {
+  User user = 10;
+}
+
+message UpdateMeRequest {
+  string name = 10;
+  string locale = 20;
+  // light, dark or system; empty keeps the current value.
+  string theme = 30;
+}
+
+message UpdateMeResponse {
+  User user = 10;
+}
+
+message SetMyAvatarRequest {
+  // As SetUserAvatarRequest: empty removes the picture.
+  bytes image = 10;
+  string mime_type = 20;
+}
+
+message SetMyAvatarResponse {}
+
 // ---- roles ----
 
 message Role {
@@ -161,6 +288,8 @@ message Role {
   string description = 20;
   // Permissions are colon separated segments ("identity:user:read"); "*" is a wildcard (alone: everything, trailing: one or more segments, elsewhere: one segment).
   repeated string permissions = 30;
+  // How many users and clients hold the role (filled by ListRoles and the role responses); a role that is held cannot be deleted.
+  int64 assigned_count = 40;
 }
 
 message CreateRoleRequest {
@@ -180,11 +309,94 @@ message SetRolePermissionsResponse {
   Role role = 10;
 }
 
-message ListRolesRequest {}
+// Replaces the description and the permissions of a role.
+message UpdateRoleRequest {
+  string role = 10;
+  string description = 20;
+  repeated string permissions = 30;
+}
+
+message UpdateRoleResponse {
+  Role role = 10;
+}
+
+// Fails with FAILED_PRECONDITION while a user or a client holds the role.
+message DeleteRoleRequest {
+  string role = 10;
+}
+
+message DeleteRoleResponse {}
+
+message ListRolesRequest {
+  // Roles whose name or description contains this text, or that hold a permission containing it (case
+  // insensitive). Empty lists every role.
+  string query = 10;
+  // Default 50, at most 200.
+  int32 page_size = 20;
+  // The next_page_token of the previous page. Roles are ordered by name.
+  string page_token = 30;
+}
 
 message ListRolesResponse {
   repeated Role roles = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
+  // How many roles match the query (all pages).
+  int64 total = 30;
 }
+
+// ---- permission catalog ----
+
+message Permission {
+  // Colon separated segments ("identity:user:read"); "*" is a wildcard (see Role.permissions).
+  string name = 10;
+  string description = 20;
+  // How many roles hold it.
+  int64 role_count = 30;
+}
+
+message ListPermissionsRequest {
+  // Permissions whose name or description contains this text (case insensitive). Empty lists every one.
+  string query = 10;
+  // Default 50, at most 200.
+  int32 page_size = 20;
+  // The next_page_token of the previous page. Permissions are ordered by name.
+  string page_token = 30;
+}
+
+message ListPermissionsResponse {
+  repeated Permission permissions = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
+  // How many permissions match the query (all pages).
+  int64 total = 30;
+}
+
+message CreatePermissionRequest {
+  Permission permission = 10;
+}
+
+message CreatePermissionResponse {
+  Permission permission = 10;
+}
+
+message UpdatePermissionRequest {
+  // The name of the permission (the path parameter of the gateway is `permission`).
+  string name = 10;
+  string permission = 20;
+  string description = 30;
+}
+
+message UpdatePermissionResponse {
+  Permission permission = 10;
+}
+
+message DeletePermissionRequest {
+  string name = 10;
+  string permission = 20;
+}
+
+message DeletePermissionResponse {}
 
 message AssignRoleRequest {
   // Exactly one of the two.
@@ -223,6 +435,8 @@ message Client {
   // Default audience of the tokens issued to this client.
   string resource = 90;
   repeated string roles = 100;
+  // A disabled client can neither start a sign in nor get tokens.
+  bool disabled = 110;
 }
 
 message CreateClientRequest {
@@ -244,10 +458,56 @@ message RotateClientSecretResponse {
   string client_secret = 10;
 }
 
-message ListClientsRequest {}
+// Replaces everything but client_id and the type (the type is fixed once the client exists).
+message UpdateClientRequest {
+  string client_id = 10;
+  string name = 20;
+  repeated string redirect_uris = 30;
+  repeated string post_logout_redirect_uris = 40;
+  string backchannel_logout_uri = 50;
+  repeated string allowed_grants = 60;
+  repeated string allowed_scopes = 70;
+  string resource = 80;
+  repeated string roles = 90;
+}
+
+message UpdateClientResponse {
+  Client client = 10;
+}
+
+message SetClientDisabledRequest {
+  string client_id = 10;
+  bool disabled = 20;
+}
+
+message SetClientDisabledResponse {
+  Client client = 10;
+}
+
+// Only a disabled client can be deleted (FAILED_PRECONDITION otherwise), and never the client of the
+// calling token. Its roles and exchange policies go with it.
+message DeleteClientRequest {
+  string client_id = 10;
+}
+
+message DeleteClientResponse {}
+
+message ListClientsRequest {
+  // Clients whose id, name or type contains this text, or that have a grant or a role containing it (case
+  // insensitive). Empty lists every client.
+  string query = 10;
+  // Only clients of this type; unspecified lists both. Combined with query by AND.
+  ClientType type = 20;
+  // Default 50, at most 200.
+  int32 page_size = 30;
+  // The next_page_token of the previous page. Clients are ordered by client_id.
+  string page_token = 40;
+}
 
 message ListClientsResponse {
   repeated Client clients = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
 }
 
 // ---- token exchange ----
@@ -270,11 +530,22 @@ message SetExchangePolicyRequest {
 message SetExchangePolicyResponse {}
 
 message ListExchangePoliciesRequest {
+  // Only the policies of this client (exact).
   string client_id = 10;
+  // Policies whose client_id, audience or max_scope contains this text (case insensitive).
+  string query = 20;
+  // Policies whose audience contains this text (case insensitive). All filters are combined with AND.
+  string audience = 30;
+  // Default 50, at most 200.
+  int32 page_size = 40;
+  // The next_page_token of the previous page. Policies are ordered by client_id, then audience.
+  string page_token = 50;
 }
 
 message ListExchangePoliciesResponse {
   repeated ExchangePolicy policies = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
 }
 
 // ---- MFA ----
