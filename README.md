@@ -7,6 +7,7 @@ buf.yaml                 # lint + breaking rules (buf v2)
 buf.gen.<lang>.yaml      # one generation template per language: go java scala rust
 ping/v1/ping.proto
 courier/v1/courier.proto
+dictionary/v1/dictionary.proto
 scripts/                 # verify.sh, generate.sh, lib.sh, install-scalapb.sh
 ```
 

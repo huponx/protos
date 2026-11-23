@@ -1,0 +1,236 @@
+syntax = "proto3";
+
+package dictionary.v1;
+
+option go_package = "github.com/huponx/protogen/dictionary/v1;dictionaryv1";
+
+// DictionaryService looks words up and keeps a per-user list of saved words that can be exported
+// as an Anki deck. The user is the subject of the token, never a field of a request. Every method
+// needs a permission, see the comment of the method.
+service DictionaryService {
+  // LookupWord returns the entry of one word. Permission: dictionary:word:read.
+  rpc LookupWord(LookupWordRequest) returns (LookupWordResponse);
+  // LookupWords returns the entries of several words (at most 20). Words without an entry are
+  // listed in not_found instead of failing the call. Permission: dictionary:word:read.
+  rpc LookupWords(LookupWordsRequest) returns (LookupWordsResponse);
+
+  // SaveWord adds a word to the user's pending list (an upsert). Fails with RESOURCE_EXHAUSTED
+  // (MAX_SAVED_WORDS_REACHED) when the pending list is full. Permission: dictionary:word:write.
+  rpc SaveWord(SaveWordRequest) returns (SaveWordResponse);
+  // ListSavedWords lists the pending (not yet exported) words, newest first.
+  // Permission: dictionary:word:read.
+  rpc ListSavedWords(ListSavedWordsRequest) returns (ListSavedWordsResponse);
+  // DeleteSavedWord removes a pending word. Permission: dictionary:word:write.
+  rpc DeleteSavedWord(DeleteSavedWordRequest) returns (DeleteSavedWordResponse);
+  // ExportAnki builds an Anki deck (.apkg) from the pending words and marks them exported, which
+  // starts a new batch. Fails with INVALID_ARGUMENT (NO_WORDS_TO_EXPORT) when nothing is pending.
+  // Permission: dictionary:word:write.
+  rpc ExportAnki(ExportAnkiRequest) returns (ExportAnkiResponse);
+  // CreateDeckLink does what ExportAnki does (builds the deck, marks the words exported) but keeps
+  // the .apkg for a short time behind a random token instead of returning it, so that an Anki app
+  // can import it from a link ("download link" of AnkiMobile). A link of the same user created
+  // earlier is replaced. Permission: dictionary:word:write.
+  rpc CreateDeckLink(CreateDeckLinkRequest) returns (CreateDeckLinkResponse);
+  // DownloadDeck returns the deck of a link and burns the link (it works once). It is called by the
+  // gateway for the anonymous download request, so it takes a service token (client credentials)
+  // and refuses user tokens. NOT_FOUND when the token is unknown, used or expired.
+  rpc DownloadDeck(DownloadDeckRequest) returns (DownloadDeckResponse);
+
+  // GetSettings returns the settings of the whole system. Permission: dictionary:settings:read.
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  // UpdateSettings changes them (all fields are written; only the ones that differ are stored). Fails with
+  // INVALID_ARGUMENT when a value is out of range or no dictionary stays enabled.
+  // Permission: dictionary:settings:write.
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  // GetMySettings returns the preferences of the user together with the settings of the system, which
+  // tell what the user may choose from. Permission: dictionary:word:read.
+  rpc GetMySettings(GetMySettingsRequest) returns (GetMySettingsResponse);
+  // UpdateMySettings stores the preferences of the user (kept by identity). INVALID_ARGUMENT when a value
+  // is out of range, no dictionary is left enabled or the default is not an enabled one.
+  // Permission: dictionary:word:read.
+  rpc UpdateMySettings(UpdateMySettingsRequest) returns (UpdateMySettingsResponse);
+}
+
+// Dictionary selects the source of a lookup.
+enum Dictionary {
+  DICTIONARY_UNSPECIFIED = 0;
+  // English definitions.
+  DICTIONARY_ENGLISH = 10;
+  // English words with Vietnamese meanings.
+  DICTIONARY_ENGLISH_VIETNAMESE = 20;
+}
+
+message Meaning {
+  string definition = 10;
+  repeated string examples = 20;
+  // The definition is a machine translation (no human entry was found).
+  bool machine_translated = 30;
+}
+
+message Word {
+  string text = 10;
+  // The first phonetic spelling found, for when UK and US are not told apart.
+  string phonetic = 20;
+  string phonetic_uk = 30;
+  string phonetic_us = 40;
+  string audio_uk = 50;
+  string audio_us = 60;
+  repeated string part_of_speech = 70;
+  repeated Meaning meanings = 80;
+}
+
+message LookupWordRequest {
+  string word = 10;
+  // UNSPECIFIED means DICTIONARY_ENGLISH.
+  Dictionary dictionary = 20;
+}
+
+message LookupWordResponse {
+  Word word = 10;
+}
+
+message LookupWordsRequest {
+  repeated string words = 10;
+  Dictionary dictionary = 20;
+}
+
+message LookupWordsResponse {
+  repeated Word words = 10;
+  // Words that have no entry.
+  repeated string not_found = 20;
+}
+
+message SavedWord {
+  string word = 10;
+  // The card back (HTML). The placeholders replace_audio_uk and replace_audio_us become sound
+  // tags in the exported deck.
+  string content = 20;
+  string audio_uk = 30;
+  string audio_us = 40;
+  // RFC 3339.
+  string created_at = 50;
+}
+
+message SaveWordRequest {
+  string word = 10;
+  string content = 20;
+  string audio_uk = 30;
+  string audio_us = 40;
+}
+
+message SaveWordResponse {
+  // Pending words of the user after the save.
+  int32 saved_count = 10;
+}
+
+message ListSavedWordsRequest {
+  // Default 50, at most 200.
+  int32 page_size = 10;
+  // The next_page_token of the previous page.
+  string page_token = 20;
+}
+
+message ListSavedWordsResponse {
+  repeated SavedWord words = 10;
+  // Empty on the last page.
+  string next_page_token = 20;
+  // Pending words of the user (all pages).
+  int32 total = 30;
+}
+
+message DeleteSavedWordRequest {
+  string word = 10;
+}
+
+message DeleteSavedWordResponse {}
+
+message ExportAnkiRequest {
+  // Default "My Words".
+  string deck_name = 10;
+}
+
+message ExportAnkiResponse {
+  // Suggested file name, for example "My Words.apkg".
+  string filename = 10;
+  // The .apkg file.
+  bytes data = 20;
+  // Words in the deck.
+  int32 word_count = 30;
+}
+
+message CreateDeckLinkRequest {
+  // Default "My Words".
+  string deck_name = 10;
+}
+
+message CreateDeckLinkResponse {
+  // The secret of the link (URL safe). Whoever knows it can download the deck once.
+  string token = 10;
+  // File name of the deck, for example "My Words.apkg".
+  string filename = 20;
+  // Words in the deck.
+  int32 word_count = 30;
+  // RFC 3339: when the link stops working.
+  string expires_at = 40;
+}
+
+message DownloadDeckRequest {
+  string token = 10;
+}
+
+message DownloadDeckResponse {
+  string filename = 10;
+  // The .apkg file.
+  bytes data = 20;
+}
+
+// Settings of the whole system, edited by an administrator.
+message Settings {
+  // Pending (not yet exported) words one user may keep.
+  int32 max_saved_words = 10;
+  // Anki deck download (ExportAnki).
+  bool allow_export_deck = 20;
+  // Anki deck behind a link (CreateDeckLink).
+  bool allow_export_link = 30;
+  // The dictionaries that can be looked up.
+  bool english_enabled = 40;
+  bool english_vi_enabled = 50;
+}
+
+// Preferences of one user. They only narrow what Settings allows.
+message UserSettings {
+  bool english_enabled = 10;
+  bool english_vi_enabled = 20;
+  // The dictionary selected first; one of the enabled ones.
+  Dictionary default_dictionary = 30;
+  // Deck name the export starts with ("My Words" when empty).
+  string deck_name = 40;
+  // Words per lookup the user wants to allow (1 to 20).
+  int32 max_lookup_words = 50;
+}
+
+message GetSettingsRequest {}
+message GetSettingsResponse {
+  Settings settings = 10;
+}
+
+message UpdateSettingsRequest {
+  Settings settings = 10;
+}
+message UpdateSettingsResponse {
+  Settings settings = 10;
+}
+
+message GetMySettingsRequest {}
+message GetMySettingsResponse {
+  UserSettings user = 10;
+  Settings system = 20;
+}
+
+message UpdateMySettingsRequest {
+  UserSettings user = 10;
+}
+message UpdateMySettingsResponse {
+  UserSettings user = 10;
+  Settings system = 20;
+}

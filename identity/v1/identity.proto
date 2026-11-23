@@ -39,6 +39,12 @@ service IdentityService {
   // UpdateMe changes the own name and locale; an empty field keeps the current value.
   rpc UpdateMe(UpdateMeRequest) returns (UpdateMeResponse);
   rpc SetMyAvatar(SetMyAvatarRequest) returns (SetMyAvatarResponse);
+  // The settings the signed-in user keeps for one application ("dictionary"): a JSON object that
+  // identity stores without looking inside; the application validates what it writes. Same rules as
+  // the other "me" methods (user token, no permission). Called by the application on behalf of the
+  // user (token exchange), not by the browser.
+  rpc GetMyUserSettings(GetMyUserSettingsRequest) returns (GetMyUserSettingsResponse);
+  rpc PutMyUserSettings(PutMyUserSettingsRequest) returns (PutMyUserSettingsResponse);
 
   // Roles. Permission: identity:role:read for List, identity:role:write for the others.
   rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
@@ -280,6 +286,24 @@ message SetMyAvatarRequest {
 }
 
 message SetMyAvatarResponse {}
+
+message GetMyUserSettingsRequest {
+  // Short lowercase name of the application: a letter, then letters, digits, "_" or "-" (32 at most).
+  string app = 10;
+}
+
+message GetMyUserSettingsResponse {
+  // A JSON object; "{}" when the user has stored nothing for the application.
+  string settings_json = 10;
+}
+
+message PutMyUserSettingsRequest {
+  string app = 10;
+  // A JSON object of at most 16 KiB; it replaces what was stored.
+  string settings_json = 20;
+}
+
+message PutMyUserSettingsResponse {}
 
 // ---- roles ----
 
