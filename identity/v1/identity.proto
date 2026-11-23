@@ -80,6 +80,12 @@ service IdentityService {
   rpc SetUserMFA(SetUserMFARequest) returns (SetUserMFAResponse);
   rpc EnforceUserMFA(EnforceUserMFARequest) returns (EnforceUserMFAResponse);
   rpc ResetUserMFA(ResetUserMFARequest) returns (ResetUserMFAResponse);
+
+  // The look of the web apps (admin, dictionary, sign in), one value for the whole system.
+  // GetUIStyle: any signed-in user (no permission); the sign in pages read it through the public
+  // /auth-api/ui-style instead. SetUIStyle. Permission: identity:settings:write.
+  rpc GetUIStyle(GetUIStyleRequest) returns (GetUIStyleResponse);
+  rpc SetUIStyle(SetUIStyleRequest) returns (SetUIStyleResponse);
 }
 
 // ---- tokens ----
@@ -606,3 +612,25 @@ message ResetUserMFARequest {
 }
 
 message ResetUserMFAResponse {}
+
+// ---- system settings ----
+
+message GetUIStyleRequest {}
+
+message GetUIStyleResponse {
+  // saas (the default), glass or mono.
+  string ui_style = 10;
+  // Palette of each style: {"saas":"aurora","glass":"ocean","mono":"aurora"}.
+  map<string, string> ui_palettes = 20;
+}
+
+message SetUIStyleRequest {
+  string ui_style = 10;
+  // Palette per style; a style left out keeps its stored palette.
+  map<string, string> ui_palettes = 20;
+}
+
+message SetUIStyleResponse {
+  string ui_style = 10;
+  map<string, string> ui_palettes = 20;
+}
