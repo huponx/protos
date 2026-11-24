@@ -14,16 +14,17 @@ service DictionaryService {
   // listed in not_found instead of failing the call. Permission: dictionary:word:read.
   rpc LookupWords(LookupWordsRequest) returns (LookupWordsResponse);
 
-  // SaveWord adds a word to the user's pending list (an upsert). Fails with RESOURCE_EXHAUSTED
-  // (MAX_SAVED_WORDS_REACHED) when the pending list is full. Permission: dictionary:word:write.
+  // SaveWord adds a word to the user's list (an upsert; an exported word becomes new again). Fails with
+  // RESOURCE_EXHAUSTED (MAX_SAVED_WORDS_REACHED) when the list is full. Permission: dictionary:word:write.
   rpc SaveWord(SaveWordRequest) returns (SaveWordResponse);
-  // ListSavedWords lists the pending (not yet exported) words, newest first.
-  // Permission: dictionary:word:read.
+  // ListSavedWords lists the words of the list, newest first: the new ones and the exported ones that were
+  // kept (remove after export is off). Permission: dictionary:word:read.
   rpc ListSavedWords(ListSavedWordsRequest) returns (ListSavedWordsResponse);
-  // DeleteSavedWord removes a pending word. Permission: dictionary:word:write.
+  // DeleteSavedWord removes a word of the list. Permission: dictionary:word:write.
   rpc DeleteSavedWord(DeleteSavedWordRequest) returns (DeleteSavedWordResponse);
-  // ExportAnki builds an Anki deck (.apkg) from the pending words and marks them exported, which
-  // starts a new batch. Fails with INVALID_ARGUMENT (NO_WORDS_TO_EXPORT) when nothing is pending.
+  // ExportAnki builds an Anki deck (.apkg) from the new words (or all of the list, see scope) and marks
+  // them exported. When remove after export is in effect (system AND user) they also leave the list.
+  // Fails with INVALID_ARGUMENT (NO_WORDS_TO_EXPORT) when there is nothing to export.
   // Permission: dictionary:word:write.
   rpc ExportAnki(ExportAnkiRequest) returns (ExportAnkiResponse);
   // CreateDeckLink does what ExportAnki does (builds the deck, marks the words exported) but keeps
@@ -35,6 +36,19 @@ service DictionaryService {
   // gateway for the anonymous download request, so it takes a service token (client credentials)
   // and refuses user tokens. NOT_FOUND when the token is unknown, used or expired.
   rpc DownloadDeck(DownloadDeckRequest) returns (DownloadDeckResponse);
+  // RemoveExportedWords takes the exported words out of the list (the new ones stay). The dict app calls it
+  // when the user answers "remove them" after remove after export came on. Permission: dictionary:word:write.
+  rpc RemoveExportedWords(RemoveExportedWordsRequest) returns (RemoveExportedWordsResponse);
+
+  // UploadImage stores an image of a card (png, jpeg, gif or webp; never svg). The service shrinks it
+  // (longest side at most DICTIONARY_IMAGE_MAX_DIM), re-encodes it without metadata and returns the id that
+  // the card content refers to as dictimg:<id>. The same image of the same user gets the same id. Fails with
+  // INVALID_ARGUMENT (IMAGE_UNSUPPORTED, IMAGE_TOO_LARGE), RESOURCE_EXHAUSTED (IMAGE_QUOTA_EXCEEDED) or
+  // FAILED_PRECONDITION (IMAGES_DISABLED, no image directory). Permission: dictionary:word:write.
+  rpc UploadImage(UploadImageRequest) returns (UploadImageResponse);
+  // GetImage returns an image of the user (NOT_FOUND for an unknown id or one of another user).
+  // Permission: dictionary:word:read.
+  rpc GetImage(GetImageRequest) returns (GetImageResponse);
 
   // GetSettings returns the settings of the whole system. Permission: dictionary:settings:read.
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
@@ -109,6 +123,9 @@ message SavedWord {
   string audio_us = 40;
   // RFC 3339.
   string created_at = 50;
+  // The word was packed in a deck. It is still in the list (remove after export is off) until the user
+  // deletes it; saving it again makes it new.
+  bool exported = 60;
 }
 
 message SaveWordRequest {
@@ -134,8 +151,10 @@ message ListSavedWordsResponse {
   repeated SavedWord words = 10;
   // Empty on the last page.
   string next_page_token = 20;
-  // Pending words of the user (all pages).
+  // Words in the list of the user (all pages), the exported ones too.
   int32 total = 30;
+  // How many of them are new (never exported).
+  int32 new_total = 40;
 }
 
 message DeleteSavedWordRequest {
@@ -144,9 +163,21 @@ message DeleteSavedWordRequest {
 
 message DeleteSavedWordResponse {}
 
+// ExportScope selects the words an export packs.
+enum ExportScope {
+  // Same as NEW.
+  EXPORT_SCOPE_UNSPECIFIED = 0;
+  // The words that were never exported.
+  EXPORT_SCOPE_NEW = 10;
+  // Every word of the list, the exported ones too.
+  EXPORT_SCOPE_ALL = 20;
+}
+
 message ExportAnkiRequest {
   // Default "My Words".
   string deck_name = 10;
+  // Default: new words only.
+  ExportScope scope = 20;
 }
 
 message ExportAnkiResponse {
@@ -161,6 +192,15 @@ message ExportAnkiResponse {
 message CreateDeckLinkRequest {
   // Default "My Words".
   string deck_name = 10;
+  // Default: new words only.
+  ExportScope scope = 20;
+}
+
+message RemoveExportedWordsRequest {}
+
+message RemoveExportedWordsResponse {
+  // Words that left the list.
+  int32 removed = 10;
 }
 
 message CreateDeckLinkResponse {
@@ -184,6 +224,26 @@ message DownloadDeckResponse {
   bytes data = 20;
 }
 
+message UploadImageRequest {
+  // MIME type the client claims; the service checks the bytes, not this.
+  string content_type = 10;
+  bytes data = 20;
+}
+
+message UploadImageResponse {
+  // UUID; the card content refers to the image as dictimg:<id>.
+  string id = 10;
+}
+
+message GetImageRequest {
+  string id = 10;
+}
+
+message GetImageResponse {
+  string content_type = 10;
+  bytes data = 20;
+}
+
 // Settings of the whole system, edited by an administrator.
 message Settings {
   // Pending (not yet exported) words one user may keep.
@@ -195,6 +255,10 @@ message Settings {
   // The dictionaries that can be looked up.
   bool english_enabled = 40;
   bool english_vi_enabled = 50;
+  // An export takes the words out of the list (a user can still turn it off for themself).
+  bool remove_after_export = 60;
+  // Hours a word that left the list is kept before the cleanup deletes it (1 to 8760).
+  int32 exported_retention_hours = 70;
 }
 
 // Preferences of one user. They only narrow what Settings allows.
@@ -207,6 +271,11 @@ message UserSettings {
   string deck_name = 40;
   // Words per lookup the user wants to allow (1 to 20).
   int32 max_lookup_words = 50;
+  // An export takes the words out of the list. Only in effect when Settings allows it too.
+  bool remove_after_export = 60;
+  // The user answered what to do with the exported words that were still in the list when remove after
+  // export came on. Cleared by the client when it goes off.
+  bool remove_acknowledged = 70;
 }
 
 message GetSettingsRequest {}
