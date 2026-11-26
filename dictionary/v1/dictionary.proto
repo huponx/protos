@@ -20,6 +20,9 @@ service DictionaryService {
   // ListSavedWords lists the words of the list, newest first: the new ones and the exported ones that were
   // kept (remove after export is off). Permission: dictionary:word:read.
   rpc ListSavedWords(ListSavedWordsRequest) returns (ListSavedWordsResponse);
+  // CheckSavedWords tells which of up to 100 words are in the list of the user, with their categories: the lookup
+  // marks the words that are saved without reading the whole list. Permission: dictionary:word:read.
+  rpc CheckSavedWords(CheckSavedWordsRequest) returns (CheckSavedWordsResponse);
   // DeleteSavedWord removes a word of the list. Permission: dictionary:word:write.
   rpc DeleteSavedWord(DeleteSavedWordRequest) returns (DeleteSavedWordResponse);
   // ExportAnki builds an Anki deck (.apkg) from the new words (or all of the list, see scope) and marks
@@ -32,10 +35,46 @@ service DictionaryService {
   // can import it from a link ("download link" of AnkiMobile). A link of the same user created
   // earlier is replaced. Permission: dictionary:word:write.
   rpc CreateDeckLink(CreateDeckLinkRequest) returns (CreateDeckLinkResponse);
+  // StartExport starts a job that packs a list that is too long for ExportAnki (EXPORT_USE_JOB) in parts,
+  // each a deck file of at most the size limit, and marks the words of a part exported when the part is
+  // done. The words are the new ones (or all, see scope), of the category or of no category. One job at a
+  // time per user: another one fails with EXPORT_JOB_ACTIVE. Permission: dictionary:word:write.
+  rpc StartExport(StartExportRequest) returns (StartExportResponse);
+  // GetExport returns the state of a job and its parts so far. The id "latest" (or empty) is the job started
+  // last by the user. NOT_FOUND when there is none. Permission: dictionary:word:write.
+  rpc GetExport(GetExportRequest) returns (GetExportResponse);
+  // CancelExport stops a queued or running job; the parts made so far stay downloadable until the job
+  // expires. Permission: dictionary:word:write.
+  rpc CancelExport(CancelExportRequest) returns (CancelExportResponse);
+  // CreateExportPartLink makes the download link of a part of a job (the same anonymous download as
+  // CreateDeckLink, but it works many times until the job expires). Permission: dictionary:word:write.
+  rpc CreateExportPartLink(CreateExportPartLinkRequest) returns (CreateExportPartLinkResponse);
   // DownloadDeck returns the deck of a link and burns the link (it works once). It is called by the
   // gateway for the anonymous download request, so it takes a service token (client credentials)
   // and refuses user tokens. NOT_FOUND when the token is unknown, used or expired.
   rpc DownloadDeck(DownloadDeckRequest) returns (DownloadDeckResponse);
+  // DownloadExportPart streams the part of an export job (see CreateExportPartLink) in chunks of at most 256 KiB, so
+  // a part larger than a gRPC message travels without being held whole: the first chunk carries filename and size,
+  // the next ones only data. Like DownloadDeck it takes a service token (the gateway). NOT_FOUND when the token is
+  // unknown or expired.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc DownloadExportPart(DownloadExportPartRequest) returns (stream DownloadChunk);
+  // ListCategories lists the categories of the user (by name) with their word counts. Permission: dictionary:word:read.
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
+  // CreateCategory adds a category. Fails with ALREADY_EXISTS (CATEGORY_EXISTS) for a name the user has (case-insensitive),
+  // RESOURCE_EXHAUSTED (CATEGORY_LIMIT_REACHED) at 50 categories and INVALID_ARGUMENT for a name of 0 or more
+  // than 40 characters. Permission: dictionary:word:write.
+  rpc CreateCategory(CreateCategoryRequest) returns (CreateCategoryResponse);
+  // RenameCategory renames one. NOT_FOUND for an unknown id, ALREADY_EXISTS (CATEGORY_EXISTS) for a name in use.
+  // Permission: dictionary:word:write.
+  rpc RenameCategory(RenameCategoryRequest) returns (RenameCategoryResponse);
+  // DeleteCategory deletes the category only; its words stay in the list. NOT_FOUND for an unknown id.
+  // Permission: dictionary:word:write.
+  rpc DeleteCategory(DeleteCategoryRequest) returns (DeleteCategoryResponse);
+  // UpdateWordCategories adds the words to some categories and takes them out of others, in one step. It does not
+  // touch the card or the exported flag. NOT_FOUND for an unknown category; words that are not in the list are
+  // ignored. Permission: dictionary:word:write.
+  rpc UpdateWordCategories(UpdateWordCategoriesRequest) returns (UpdateWordCategoriesResponse);
   // RemoveExportedWords takes the exported words out of the list (the new ones stay). The dict app calls it
   // when the user answers "remove them" after remove after export came on. Permission: dictionary:word:write.
   rpc RemoveExportedWords(RemoveExportedWordsRequest) returns (RemoveExportedWordsResponse);
@@ -50,12 +89,48 @@ service DictionaryService {
   // Permission: dictionary:word:read.
   rpc GetImage(GetImageRequest) returns (GetImageResponse);
 
+  // UploadAudio stores an audio file of a card (mp3, ogg, wav or m4a), as it is: it is not re-encoded. The
+  // card refers to it in audio_uk / audio_us as dictaud:<id>. The same file of the same user gets the same
+  // id. Fails with INVALID_ARGUMENT (AUDIO_UNSUPPORTED, AUDIO_TOO_LARGE), RESOURCE_EXHAUSTED
+  // (AUDIO_QUOTA_EXCEEDED) or FAILED_PRECONDITION (AUDIO_DISABLED, no files directory).
+  // Permission: dictionary:word:write.
+  rpc UploadAudio(UploadAudioRequest) returns (UploadAudioResponse);
+  // GetAudio returns an audio file of the user (NOT_FOUND for an unknown id or one of another user).
+  // Permission: dictionary:word:read.
+  rpc GetAudio(GetAudioRequest) returns (GetAudioResponse);
+
+  // GetReviewQueue returns the cards to review: the ones that are due first (earliest due first), then new
+  // words (oldest first) up to the daily limit of the user, cut to limit cards. Only words still in the list.
+  // Permission: dictionary:word:read.
+  rpc GetReviewQueue(GetReviewQueueRequest) returns (GetReviewQueueResponse);
+  // SubmitReview grades a card and schedules its next review (SM-2 or FSRS, as the user chose). NOT_FOUND when the word is not in the
+  // list, INVALID_ARGUMENT for an unknown grade. Permission: dictionary:word:read.
+  rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
+  // AddReviewBonus raises the daily limits of the review for the next 24 hours by the given numbers, without
+  // touching the settings; a grant while a bonus runs adds up and renews the 24 hours. INVALID_ARGUMENT when a number
+  // is negative or above 9999, or both are 0. Permission: dictionary:word:read.
+  rpc AddReviewBonus(AddReviewBonusRequest) returns (AddReviewBonusResponse);
+  // OptimizeReviewParameters fits the FSRS parameters to the review history of the user and stores them when they
+  // predict better than the defaults (restore_defaults = true forgets them instead). FAILED_PRECONDITION when there are too few
+  // reviews, RESOURCE_EXHAUSTED when called again within a minute or while another run is going.
+  // Permission: dictionary:word:read.
+  rpc OptimizeReviewParameters(OptimizeReviewParametersRequest) returns (OptimizeReviewParametersResponse);
+
   // GetSettings returns the settings of the whole system. Permission: dictionary:settings:read.
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   // UpdateSettings changes them (all fields are written; only the ones that differ are stored). Fails with
   // INVALID_ARGUMENT when a value is out of range or no dictionary stays enabled.
   // Permission: dictionary:settings:write.
   rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  // GetUserQuota returns what a user stores (content, images, audio), the limits an administrator set for the
+  // user and the limits in effect. NOT_FOUND for an unknown user. Permission: dictionary:settings:read.
+  rpc GetUserQuota(GetUserQuotaRequest) returns (GetUserQuotaResponse);
+  // SetUserQuota sets the own limits of a user (0 for a kind: the limit of the system again). INVALID_ARGUMENT
+  // for a limit above the ceiling of the system settings. Permission: dictionary:settings:write.
+  rpc SetUserQuota(SetUserQuotaRequest) returns (SetUserQuotaResponse);
+  // GetMyStorage returns what the user stores and the limit of each kind, own limit included.
+  // Permission: dictionary:word:read.
+  rpc GetMyStorage(GetMyStorageRequest) returns (GetMyStorageResponse);
   // GetMySettings returns the preferences of the user together with the settings of the system, which
   // tell what the user may choose from. Permission: dictionary:word:read.
   rpc GetMySettings(GetMySettingsRequest) returns (GetMySettingsResponse);
@@ -126,6 +201,12 @@ message SavedWord {
   // The word was packed in a deck. It is still in the list (remove after export is off) until the user
   // deletes it; saving it again makes it new.
   bool exported = 60;
+  // Ids of the categories of the word.
+  repeated string category_ids = 70;
+  // RFC 3339: when the word is due for its next review. Empty for a new word (never reviewed).
+  string next_review_at = 80;
+  // The word is in the learning steps (not yet graduated to the long intervals).
+  bool learning = 90;
 }
 
 message SaveWordRequest {
@@ -133,6 +214,8 @@ message SaveWordRequest {
   string content = 20;
   string audio_uk = 30;
   string audio_us = 40;
+  // Categories to add the word to. Only adds: the ones the word already has stay.
+  repeated string category_ids = 50;
 }
 
 message SaveWordResponse {
@@ -148,6 +231,11 @@ message ListSavedWordsRequest {
   // Only the words that contain this text (case-insensitive, matched on the word, not on the card).
   // Empty = all words. At most 100 characters. The totals of the response ignore it.
   string query = 30;
+  // Only the words of this category; empty = no filter. The id "uncategorized" means uncategorized = true (a query
+  // string has no bool). The totals of the response follow the filter.
+  string category_id = 40;
+  // Only the words that have no category (category_id is then ignored).
+  bool uncategorized = 50;
 }
 
 message ListSavedWordsResponse {
@@ -158,6 +246,9 @@ message ListSavedWordsResponse {
   int32 total = 30;
   // How many of them are new (never exported).
   int32 new_total = 40;
+  // The count is bounded so its cost does not grow with the list: when true, new_total (and total when a
+  // category filter is set) is a lower bound, "10000+". The unfiltered total is always exact.
+  bool counts_capped = 50;
 }
 
 message DeleteSavedWordRequest {
@@ -181,6 +272,13 @@ message ExportAnkiRequest {
   string deck_name = 10;
   // Default: new words only.
   ExportScope scope = 20;
+  // Only the words of this category; empty (with uncategorized false) = every word.
+  string category_id = 30;
+  // Only the words that have no category.
+  bool uncategorized = 40;
+  // Export exactly these words: category_id, uncategorized and scope are then ignored and exported words are
+  // packed again. At most as many as the list may hold; words not in the list are skipped.
+  repeated string words = 50;
 }
 
 message ExportAnkiResponse {
@@ -197,6 +295,13 @@ message CreateDeckLinkRequest {
   string deck_name = 10;
   // Default: new words only.
   ExportScope scope = 20;
+  // Only the words of this category; empty (with uncategorized false) = every word.
+  string category_id = 30;
+  // Only the words that have no category.
+  bool uncategorized = 40;
+  // Export exactly these words: category_id, uncategorized and scope are then ignored and exported words are
+  // packed again. At most as many as the list may hold; words not in the list are skipped.
+  repeated string words = 50;
 }
 
 message RemoveExportedWordsRequest {}
@@ -227,6 +332,18 @@ message DownloadDeckResponse {
   bytes data = 20;
 }
 
+message DownloadExportPartRequest {
+  string token = 10;
+}
+
+message DownloadChunk {
+  // Only in the first chunk.
+  string filename = 10;
+  // Size of the whole file in bytes; only in the first chunk.
+  int64 size = 20;
+  bytes data = 30;
+}
+
 message UploadImageRequest {
   // MIME type the client claims; the service checks the bytes, not this.
   string content_type = 10;
@@ -247,9 +364,175 @@ message GetImageResponse {
   bytes data = 20;
 }
 
+message UploadAudioRequest {
+  // MIME type the client claims; the service checks the bytes, not this.
+  string content_type = 10;
+  bytes data = 20;
+}
+
+message UploadAudioResponse {
+  // UUID; the card refers to the audio as dictaud:<id>.
+  string id = 10;
+}
+
+message GetAudioRequest {
+  string id = 10;
+}
+
+message GetAudioResponse {
+  string content_type = 10;
+  bytes data = 20;
+}
+
+enum ReviewGrade {
+  REVIEW_GRADE_UNSPECIFIED = 0;
+  REVIEW_GRADE_AGAIN = 1;
+  REVIEW_GRADE_HARD = 2;
+  REVIEW_GRADE_GOOD = 3;
+  REVIEW_GRADE_EASY = 4;
+}
+
+message ReviewCard {
+  string word = 10;
+  // The card as HTML, like SavedWord.content.
+  string content = 20;
+  string audio_uk = 30;
+  string audio_us = 40;
+  // The word was never reviewed.
+  bool is_new = 50;
+  // Seconds until the next review after Again, Hard, Good and Easy (in this order).
+  repeated int64 grade_intervals_seconds = 60;
+  // The card is being learned (after Again or Hard); is_new stays for words never reviewed, the two exclude each other.
+  bool learning = 70;
+}
+
+message GetReviewQueueRequest {
+  // Cards to return; 0 takes the default (50), at most 200.
+  int32 limit = 10;
+  // Only the words of this category; empty (with uncategorized false) = every word; the id "uncategorized" means
+  // uncategorized = true (a query string has no bool). The daily limit of new
+  // words stays one for all categories.
+  string category_id = 20;
+  // Only the words that have no category.
+  bool uncategorized = 30;
+}
+
+message GetReviewQueueResponse {
+  repeated ReviewCard cards = 10;
+  // Review cards (not in learning) due now, and new cards still allowed today, before the cut to limit.
+  int32 due_count = 20;
+  int32 new_count = 30;
+  // Words in the list.
+  int32 total_count = 40;
+  // RFC 3339: when the next card that is not due yet comes due; empty when there is none.
+  string next_due_at = 50;
+  // Cards being learned (after Again or Hard) that are due now.
+  int32 learning_count = 60;
+  // New words, and due plus learning cards, that are left but held back by the daily limits (with the bonus).
+  int32 new_held = 70;
+  int32 due_held = 80;
+  // A count reached its cap (10000) and is a lower bound: show "10000+".
+  bool counts_capped = 90;
+}
+
+message AddReviewBonusRequest {
+  // New words and review cards to add to today's limits (0 to 9999 each, at least one above 0).
+  int32 new_words = 10;
+  int32 reviews = 20;
+}
+
+message AddReviewBonusResponse {
+  // The whole bonus now in effect and when it ends (RFC 3339).
+  int32 extra_new = 10;
+  int32 extra_reviews = 20;
+  string expires_at = 30;
+}
+
+message SubmitReviewRequest {
+  string word = 10;
+  ReviewGrade grade = 20;
+}
+
+message SubmitReviewResponse {
+  // RFC 3339.
+  string due_at = 10;
+  int64 interval_seconds = 20;
+  // Seconds until the next review after Again, Hard, Good and Easy of the card as it is now.
+  repeated int64 grade_intervals_seconds = 30;
+}
+
+message OptimizeReviewParametersRequest {
+  // Forget the fitted parameters (back to the defaults) instead of fitting.
+  bool restore_defaults = 10;
+}
+
+message OptimizeReviewParametersResponse {
+  // The fitted parameters were stored (they beat the defaults on the held-out reviews).
+  bool applied = 10;
+  // Reviews the fit used.
+  int32 review_count = 20;
+  // Log-loss of the default and of the fitted parameters on the held-out reviews (lower is better).
+  float loss_default = 30;
+  float loss_trained = 40;
+  // RFC 3339; empty when never fitted.
+  string trained_at = 50;
+  // Why the parameters were not applied.
+  string reason = 60;
+}
+
+// Category groups saved words; a word may be in several.
+message Category {
+  string id = 10;
+  string name = 20;
+  // Words of the list in the category, and how many are new (never exported).
+  int32 total = 30;
+  int32 new_total = 40;
+}
+
+message ListCategoriesRequest {}
+message ListCategoriesResponse {
+  repeated Category categories = 10;
+  // Words in no category (total, new): for the "Uncategorized" filter.
+  int32 uncategorized_total = 20;
+  int32 uncategorized_new_total = 30;
+  // Every count is bounded: when true, at least one total or new_total is a lower bound, "10000+".
+  bool counts_capped = 40;
+}
+
+message CreateCategoryRequest {
+  string name = 10;
+}
+message CreateCategoryResponse {
+  Category category = 10;
+}
+
+message RenameCategoryRequest {
+  string id = 10;
+  string name = 20;
+}
+message RenameCategoryResponse {
+  Category category = 10;
+}
+
+message DeleteCategoryRequest {
+  string id = 10;
+}
+message DeleteCategoryResponse {}
+
+message UpdateWordCategoriesRequest {
+  repeated string words = 10;
+  repeated string add_category_ids = 20;
+  repeated string remove_category_ids = 30;
+}
+message UpdateWordCategoriesResponse {
+  // Words that were in the list.
+  int32 updated = 10;
+}
+
 // Settings of the whole system, edited by an administrator.
 message Settings {
-  // Pending (not yet exported) words one user may keep.
+  // Words one user may keep in the list, from 1 to 1,000,000 (the words that are exported and left the list do not
+  // count). Long lists are listed, counted and exported in pages and parts, see ListSavedWords and StartExport.
   int32 max_saved_words = 10;
   // Anki deck download (ExportAnki).
   bool allow_export_deck = 20;
@@ -262,6 +545,37 @@ message Settings {
   bool remove_after_export = 60;
   // Hours a word that left the list is kept before the cleanup deletes it (1 to 8760).
   int32 exported_retention_hours = 70;
+  // Categories one user may have (1 to 200, 50 until chosen); 0 from a service that predates it.
+  int32 max_categories = 80;
+  // Longest category name, in characters (1 to 100, 40 until chosen); 0 from a service that predates it.
+  int32 max_category_name_length = 90;
+  // Largest .apkg of a synchronous export (ExportAnki, CreateDeckLink), in bytes: from 64 KiB to
+  // export_max_bytes_ceiling. 0 from a client that predates it keeps the current value.
+  int32 export_max_bytes = 100;
+  // Largest part of an export job (StartExport), in bytes: from 64 KiB to export_part_max_bytes_ceiling.
+  // 0 from a client that predates it keeps the current value.
+  int32 export_part_max_bytes = 110;
+  // The ceilings of the two sizes above: the configuration of the deployment. Read only, ignored on update.
+  int32 export_max_bytes_ceiling = 120;
+  int32 export_part_max_bytes_ceiling = 130;
+  // Most words a synchronous export (ExportAnki, CreateDeckLink) packs, from 1 to 5000; a longer list is refused
+  // with EXPORT_USE_JOB and has to be exported in parts (StartExport). It bounds the memory of one request.
+  // 0 from a client that predates it keeps the current value.
+  int32 export_sync_max_words = 140;
+  // Largest content of one word, in bytes: from 1 KiB to max_content_bytes_ceiling (64 KiB until chosen).
+  // 0 from a client that predates it keeps the current value.
+  int32 max_content_bytes = 150;
+  // What one user may keep, in bytes: the content of the words in the list, the images and the audio files. Each
+  // goes up to its ceiling; a user can have an own limit (SetUserQuota). 0 from a client that predates it keeps
+  // the current value.
+  int64 content_user_quota = 160;
+  int64 image_user_quota = 170;
+  int64 audio_user_quota = 180;
+  // The ceilings of the four sizes above: the configuration of the deployment. Read only, ignored on update.
+  int32 max_content_bytes_ceiling = 190;
+  int64 content_user_quota_ceiling = 200;
+  int64 image_user_quota_ceiling = 210;
+  int64 audio_user_quota_ceiling = 220;
 }
 
 // Preferences of one user. They only narrow what Settings allows.
@@ -282,6 +596,14 @@ message UserSettings {
   // Every export is a new deck for Anki: importing it again adds copies of the cards. Off (the default): the cards
   // keep their identity, so importing a deck again updates them (the deck name must stay the same).
   bool fresh_deck = 80;
+  // New words the review shows per 24 hours (0 to 100; 0: no new words).
+  int32 review_new_per_day = 90;
+  // Review cards (due and learning) the review shows per 24 hours (0 to 9999; 0: none).
+  int32 review_max_per_day = 100;
+  // The algorithm that schedules the review: "sm2" or "fsrs"; empty is "sm2".
+  string review_algorithm = 110;
+  // FSRS: the chance (in percent, 70 to 97) to remember a card on the day it is due; 0 is 90.
+  int32 desired_retention = 120;
 }
 
 message GetSettingsRequest {}
@@ -296,10 +618,57 @@ message UpdateSettingsResponse {
   Settings settings = 10;
 }
 
+// StorageQuota is a size in bytes per kind of storage.
+message StorageQuota {
+  int64 content = 10;
+  int64 image = 20;
+  int64 audio = 30;
+}
+
+message GetUserQuotaRequest {
+  string user_id = 10;
+}
+message GetUserQuotaResponse {
+  // What the user stores now.
+  StorageQuota used = 10;
+  // The limits set for this user; 0 for a kind without one (the system setting applies).
+  StorageQuota override = 20;
+  // The limits in effect: the override, else the system setting.
+  StorageQuota effective = 30;
+}
+
+message SetUserQuotaRequest {
+  string user_id = 10;
+  // The own limits of the user; 0 or absent removes the limit of that kind.
+  StorageQuota quotas = 20;
+}
+message SetUserQuotaResponse {
+  StorageQuota used = 10;
+  StorageQuota override = 20;
+  StorageQuota effective = 30;
+}
+
+// StorageUsage is what is stored and the limit of it, in bytes.
+message StorageUsage {
+  int64 used = 10;
+  int64 limit = 20;
+}
+
+message GetMyStorageRequest {}
+message GetMyStorageResponse {
+  StorageUsage content = 10;
+  StorageUsage image = 20;
+  StorageUsage audio = 30;
+}
+
 message GetMySettingsRequest {}
 message GetMySettingsResponse {
   UserSettings user = 10;
   Settings system = 20;
+  // RFC 3339: when the FSRS parameters of the user were last fitted and applied; empty when they are the defaults.
+  string fsrs_trained_at = 30;
+  // Reviews that fit used.
+  int32 fsrs_review_count = 40;
 }
 
 message UpdateMySettingsRequest {
@@ -308,4 +677,86 @@ message UpdateMySettingsRequest {
 message UpdateMySettingsResponse {
   UserSettings user = 10;
   Settings system = 20;
+}
+
+message StartExportRequest {
+  string deck_name = 10;
+  ExportScope scope = 20;
+  // Only the words of this category; the id "uncategorized" (or uncategorized = true) keeps the words in none.
+  string category_id = 30;
+  bool uncategorized = 40;
+}
+message StartExportResponse {
+  ExportJob job = 10;
+}
+
+message GetExportRequest {
+  // A job id, or "latest" (also empty).
+  string id = 10;
+}
+message GetExportResponse {
+  ExportJob job = 10;
+}
+
+message CancelExportRequest {
+  string id = 10;
+}
+message CancelExportResponse {
+  ExportJob job = 10;
+}
+
+message CreateExportPartLinkRequest {
+  string id = 10;
+  // The part number, from 1.
+  int32 n = 20;
+}
+message CreateExportPartLinkResponse {
+  string token = 10;
+  string filename = 20;
+  int32 word_count = 30;
+  // RFC 3339: when the link stops working (the job expires).
+  string expires_at = 40;
+}
+
+// ExportJob is the state of an export job.
+message ExportJob {
+  string id = 10;
+  // queued, running, done, failed or cancelled.
+  string status = 20;
+  string deck_name = 30;
+  // Words the job packs (known once it runs; 0 before), and how many it has packed.
+  int32 total = 40;
+  int32 built = 50;
+  // Words of the part being built that are done so far (an estimate, 0 between parts); built + building is the
+  // progress to show.
+  int32 building = 110;
+  repeated ExportPart parts = 60;
+  // Why a failed job failed.
+  string error = 70;
+  string created_at = 80;
+  string finished_at = 90;
+  // When the job and its files are deleted.
+  string expires_at = 100;
+}
+
+message ExportPart {
+  // From 1.
+  int32 n = 10;
+  string filename = 20;
+  int32 word_count = 30;
+  // Bytes of the file.
+  int32 size = 40;
+}
+
+message CheckSavedWordsRequest {
+  // At most 100; they are normalized like the words of SaveWord, so a word that is not valid is simply not saved.
+  repeated string words = 10;
+}
+message CheckSavedWordsResponse {
+  // The words of the request that are in the list (normalized), each with the ids of its categories.
+  repeated SavedWordRef words = 10;
+}
+message SavedWordRef {
+  string word = 10;
+  repeated string category_ids = 20;
 }
