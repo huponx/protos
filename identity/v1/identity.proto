@@ -20,6 +20,8 @@ service IdentityService {
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc SetUserDisabled(SetUserDisabledRequest) returns (SetUserDisabledResponse);
+  // DeleteUser deletes the account (soft: see DeleteUserRequest).
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
   rpc SetUserPassword(SetUserPasswordRequest) returns (SetUserPasswordResponse);
   rpc SendPasswordReset(SendPasswordResetRequest) returns (SendPasswordResetResponse);
   // UpdateUser changes the name and the locale. SetUserAvatar stores (or clears) the picture.
@@ -39,6 +41,18 @@ service IdentityService {
   // UpdateMe changes the own name and locale; an empty field keeps the current value.
   rpc UpdateMe(UpdateMeRequest) returns (UpdateMeResponse);
   rpc SetMyAvatar(SetMyAvatarRequest) returns (SetMyAvatarResponse);
+  // ChangeMyPassword checks the current password and sets a new one (the password policy applies). Like SetUserPassword it
+  // ends every session and token of the user, the caller's too: the user signs in again.
+  rpc ChangeMyPassword(ChangeMyPasswordRequest) returns (ChangeMyPasswordResponse);
+  // The own multi-factor authentication (the same steps as the account page of the sign in app). GetMyMFA only says whether it is on.
+  rpc GetMyMFA(GetMyMFARequest) returns (GetMyMFAResponse);
+  // BeginMyMFA starts the setup: it returns the QR code and the key of the pending enrollment (created on the first call,
+  // the same ones after). Refused when MFA is already on.
+  rpc BeginMyMFA(BeginMyMFARequest) returns (BeginMyMFAResponse);
+  // ConfirmMyMFA checks the first code of the authenticator app, turns MFA on and returns the recovery codes (shown once).
+  rpc ConfirmMyMFA(ConfirmMyMFARequest) returns (ConfirmMyMFAResponse);
+  // DisableMyMFA turns MFA off after the password and a code (or a recovery code); refused when MFA is required for the user.
+  rpc DisableMyMFA(DisableMyMFARequest) returns (DisableMyMFAResponse);
   // The settings the signed-in user keeps for one application ("dictionary"): a JSON object that
   // identity stores without looking inside; the application validates what it writes. Same rules as
   // the other "me" methods (user token, no permission). Called by the application on behalf of the
@@ -228,6 +242,16 @@ message SetUserDisabledRequest {
 
 message SetUserDisabledResponse {}
 
+// The account is disabled, loses its sessions, tokens, roles, MFA and settings, and its email and name are
+// anonymized (the email can be registered again) at once; the data of the services (dictionary words, files) is
+// deleted in the background and the row after a grace period. Idempotent: deleting a deleted user succeeds.
+// FAILED_PRECONDITION for the user of the calling token and for the last user holding the admin role. There is no undo.
+message DeleteUserRequest {
+  string user_id = 10;
+}
+
+message DeleteUserResponse {}
+
 message SetUserPasswordRequest {
   string user_id = 10;
   string password = 20;
@@ -292,6 +316,46 @@ message SetMyAvatarRequest {
 }
 
 message SetMyAvatarResponse {}
+
+message ChangeMyPasswordRequest {
+  string current_password = 10;
+  string new_password = 20;
+}
+
+message ChangeMyPasswordResponse {}
+
+message GetMyMFARequest {}
+
+message GetMyMFAResponse {
+  bool enabled = 10;
+  // MFA is required for the account: it cannot be turned off.
+  bool forced = 20;
+  int32 recovery_codes_left = 30;
+}
+
+message BeginMyMFARequest {}
+
+message BeginMyMFAResponse {
+  // A data URL of the QR code and the key to type.
+  string qr = 10;
+  string secret = 20;
+}
+
+message ConfirmMyMFARequest {
+  string code = 10;
+}
+
+message ConfirmMyMFAResponse {
+  repeated string recovery_codes = 10;
+}
+
+message DisableMyMFARequest {
+  string password = 10;
+  // A code of the authenticator app or a recovery code.
+  string code = 20;
+}
+
+message DisableMyMFAResponse {}
 
 message GetMyUserSettingsRequest {
   // Short lowercase name of the application: a letter, then letters, digits, "_" or "-" (32 at most).
