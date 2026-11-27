@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package identity.v1;
 
+import "authz/v1/options.proto";
+
 option go_package = "github.com/huponx/protogen/identity/v1;identityv1";
 
 // IdentityService is the internal administration API of identity. The OAuth 2.0 and OpenID
@@ -9,97 +11,292 @@ option go_package = "github.com/huponx/protogen/identity/v1;identityv1";
 // this contract. Every method needs a permission, see the comment of the method.
 service IdentityService {
   // Introspect reports whether an access token is active (RFC 7662). Permission: identity:token:read.
-  rpc Introspect(IntrospectRequest) returns (IntrospectResponse);
+  rpc Introspect(IntrospectRequest) returns (IntrospectResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:token:read"]
+    };
+  }
   // CheckPermission reports whether a user holds a permission. Permission: identity:permission:read.
-  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:permission:read"]
+    };
+  }
   // RevokeToken revokes an access token by jti. Permission: identity:token:write.
-  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:token:write"]
+    };
+  }
 
   // Users. Permission: identity:user:read for Get and List, identity:user:write for the others.
-  rpc GetUser(GetUserRequest) returns (GetUserResponse);
-  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
-  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
-  rpc SetUserDisabled(SetUserDisabledRequest) returns (SetUserDisabledResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:read"]
+    };
+  }
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+    option (authz.v1.rule) = {
+      any_of: [
+        "identity:user:read",
+        "identity:user:approve"
+      ]
+    };
+  }
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
+  rpc SetUserDisabled(SetUserDisabledRequest) returns (SetUserDisabledResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
   // DeleteUser deletes the account (soft: see DeleteUserRequest).
-  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
-  rpc SetUserPassword(SetUserPasswordRequest) returns (SetUserPasswordResponse);
-  rpc SendPasswordReset(SendPasswordResetRequest) returns (SendPasswordResetResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
+  rpc SetUserPassword(SetUserPasswordRequest) returns (SetUserPasswordResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
+  rpc SendPasswordReset(SendPasswordResetRequest) returns (SendPasswordResetResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
   // UpdateUser changes the name and the locale. SetUserAvatar stores (or clears) the picture.
-  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
-  rpc SetUserAvatar(SetUserAvatarRequest) returns (SetUserAvatarResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
+  rpc SetUserAvatar(SetUserAvatarRequest) returns (SetUserAvatarResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
   // SendWelcome (re)sends the welcome mail with a link to set the first password. Only for a
   // user who has no password yet (status PENDING).
-  rpc SendWelcome(SendWelcomeRequest) returns (SendWelcomeResponse);
+  rpc SendWelcome(SendWelcomeRequest) returns (SendWelcomeResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
+  // ApproveUser accepts a self-registered user (status PENDING_APPROVAL): the welcome mail with the link to set the
+  // password goes out. RejectUser deletes the user and tells them by mail (the address may register again).
+  // Permission: identity:user:approve.
+  rpc ApproveUser(ApproveUserRequest) returns (ApproveUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:approve"]
+    };
+  }
+  rpc RejectUser(RejectUserRequest) returns (RejectUserResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:approve"]
+    };
+  }
 
   // Counts of users by status, MFA and activity.
-  rpc GetUserStats(GetUserStatsRequest) returns (GetUserStatsResponse);
+  rpc GetUserStats(GetUserStatsRequest) returns (GetUserStatsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:read"]
+    };
+  }
 
   // The signed-in user's own profile. Any user with a user token may call them (no permission):
   // the user is the subject of the token, never a field of the request, so nobody can reach
   // another user through them. Service tokens are refused.
-  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  rpc GetMe(GetMeRequest) returns (GetMeResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // UpdateMe changes the own name and locale; an empty field keeps the current value.
-  rpc UpdateMe(UpdateMeRequest) returns (UpdateMeResponse);
-  rpc SetMyAvatar(SetMyAvatarRequest) returns (SetMyAvatarResponse);
+  rpc UpdateMe(UpdateMeRequest) returns (UpdateMeResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc SetMyAvatar(SetMyAvatarRequest) returns (SetMyAvatarResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // ChangeMyPassword checks the current password and sets a new one (the password policy applies). Like SetUserPassword it
   // ends every session and token of the user, the caller's too: the user signs in again.
-  rpc ChangeMyPassword(ChangeMyPasswordRequest) returns (ChangeMyPasswordResponse);
+  rpc ChangeMyPassword(ChangeMyPasswordRequest) returns (ChangeMyPasswordResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // The own multi-factor authentication (the same steps as the account page of the sign in app). GetMyMFA only says whether it is on.
-  rpc GetMyMFA(GetMyMFARequest) returns (GetMyMFAResponse);
+  rpc GetMyMFA(GetMyMFARequest) returns (GetMyMFAResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // BeginMyMFA starts the setup: it returns the QR code and the key of the pending enrollment (created on the first call,
   // the same ones after). Refused when MFA is already on.
-  rpc BeginMyMFA(BeginMyMFARequest) returns (BeginMyMFAResponse);
+  rpc BeginMyMFA(BeginMyMFARequest) returns (BeginMyMFAResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // ConfirmMyMFA checks the first code of the authenticator app, turns MFA on and returns the recovery codes (shown once).
-  rpc ConfirmMyMFA(ConfirmMyMFARequest) returns (ConfirmMyMFAResponse);
+  rpc ConfirmMyMFA(ConfirmMyMFARequest) returns (ConfirmMyMFAResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // DisableMyMFA turns MFA off after the password and a code (or a recovery code); refused when MFA is required for the user.
-  rpc DisableMyMFA(DisableMyMFARequest) returns (DisableMyMFAResponse);
+  rpc DisableMyMFA(DisableMyMFARequest) returns (DisableMyMFAResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // The settings the signed-in user keeps for one application ("dictionary"): a JSON object that
   // identity stores without looking inside; the application validates what it writes. Same rules as
   // the other "me" methods (user token, no permission). Called by the application on behalf of the
   // user (token exchange), not by the browser.
-  rpc GetMyUserSettings(GetMyUserSettingsRequest) returns (GetMyUserSettingsResponse);
-  rpc PutMyUserSettings(PutMyUserSettingsRequest) returns (PutMyUserSettingsResponse);
+  rpc GetMyUserSettings(GetMyUserSettingsRequest) returns (GetMyUserSettingsResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc PutMyUserSettings(PutMyUserSettingsRequest) returns (PutMyUserSettingsResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
 
   // Roles. Permission: identity:role:read for List, identity:role:write for the others.
-  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
-  rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse);
-  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
-  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
-  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
-  // The catalog of permissions roles can be given (wildcards are entries too).
-  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
-  rpc CreatePermission(CreatePermissionRequest) returns (CreatePermissionResponse);
-  // UpdatePermission changes the description; the name is the key.
-  rpc UpdatePermission(UpdatePermissionRequest) returns (UpdatePermissionResponse);
-  // DeletePermission fails while a role holds the permission.
-  rpc DeletePermission(DeletePermissionRequest) returns (DeletePermissionResponse);
-  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse);
-  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
+  rpc SetRolePermissions(SetRolePermissionsRequest) returns (SetRolePermissionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:read"]
+    };
+  }
+  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
+  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
+  // The catalog of permissions roles can be given, read only: services define them in their permissions.proto and
+  // register them at start. The wildcards that cover them are listed too (generated, not stored).
+  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:permission:read"]
+    };
+  }
+  // RegisterPermissions is called by a service at start with everything it declares in its permissions.proto:
+  // identity inserts, updates, renames and retires the permissions of that service in one transaction. A service
+  // may only name permissions of its own namespace ("dictionary:*" from the dictionary).
+  rpc RegisterPermissions(RegisterPermissionsRequest) returns (RegisterPermissionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:permission:register"]
+    };
+  }
+  rpc AssignRole(AssignRoleRequest) returns (AssignRoleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:role:write"]
+    };
+  }
 
   // Clients. Permission: identity:client:read for List, identity:client:write for the others.
-  rpc CreateClient(CreateClientRequest) returns (CreateClientResponse);
-  rpc UpdateClient(UpdateClientRequest) returns (UpdateClientResponse);
-  rpc SetClientDisabled(SetClientDisabledRequest) returns (SetClientDisabledResponse);
-  rpc DeleteClient(DeleteClientRequest) returns (DeleteClientResponse);
-  rpc RotateClientSecret(RotateClientSecretRequest) returns (RotateClientSecretResponse);
-  rpc ListClients(ListClientsRequest) returns (ListClientsResponse);
+  rpc CreateClient(CreateClientRequest) returns (CreateClientResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:write"]
+    };
+  }
+  rpc UpdateClient(UpdateClientRequest) returns (UpdateClientResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:write"]
+    };
+  }
+  rpc SetClientDisabled(SetClientDisabledRequest) returns (SetClientDisabledResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:write"]
+    };
+  }
+  rpc DeleteClient(DeleteClientRequest) returns (DeleteClientResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:write"]
+    };
+  }
+  rpc RotateClientSecret(RotateClientSecretRequest) returns (RotateClientSecretResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:write"]
+    };
+  }
+  rpc ListClients(ListClientsRequest) returns (ListClientsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:client:read"]
+    };
+  }
 
   // Token exchange policies (deny by default). Permission: identity:exchange:read for List,
   // identity:exchange:write for Set.
-  rpc SetExchangePolicy(SetExchangePolicyRequest) returns (SetExchangePolicyResponse);
-  rpc ListExchangePolicies(ListExchangePoliciesRequest) returns (ListExchangePoliciesResponse);
+  rpc SetExchangePolicy(SetExchangePolicyRequest) returns (SetExchangePolicyResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:exchange:write"]
+    };
+  }
+  rpc ListExchangePolicies(ListExchangePoliciesRequest) returns (ListExchangePoliciesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:exchange:read"]
+    };
+  }
 
   // Multi-factor authentication. Permission: identity:mfa:read for Get, identity:mfa:write for the others.
-  rpc GetUserMFA(GetUserMFARequest) returns (GetUserMFAResponse);
-  rpc SetUserMFA(SetUserMFARequest) returns (SetUserMFAResponse);
-  rpc EnforceUserMFA(EnforceUserMFARequest) returns (EnforceUserMFAResponse);
-  rpc ResetUserMFA(ResetUserMFARequest) returns (ResetUserMFAResponse);
+  rpc GetUserMFA(GetUserMFARequest) returns (GetUserMFAResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:mfa:read"]
+    };
+  }
+  rpc SetUserMFA(SetUserMFARequest) returns (SetUserMFAResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:mfa:write"]
+    };
+  }
+  rpc EnforceUserMFA(EnforceUserMFARequest) returns (EnforceUserMFAResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:mfa:write"]
+    };
+  }
+  rpc ResetUserMFA(ResetUserMFARequest) returns (ResetUserMFAResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:mfa:write"]
+    };
+  }
 
   // The look of the web apps (admin, dictionary, sign in), one value for the whole system.
   // GetUIStyle: any signed-in user (no permission); the sign in pages read it through the public
   // /auth-api/ui-style instead. SetUIStyle. Permission: identity:settings:write.
-  rpc GetUIStyle(GetUIStyleRequest) returns (GetUIStyleResponse);
-  rpc SetUIStyle(SetUIStyleRequest) returns (SetUIStyleResponse);
+  rpc GetUIStyle(GetUIStyleRequest) returns (GetUIStyleResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc SetUIStyle(SetUIStyleRequest) returns (SetUIStyleResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:settings:write"]
+    };
+  }
+
+  // Self-registration settings. GetRegistrationSettings: identity:settings:read. SetRegistrationSettings:
+  // identity:settings:write.
+  rpc GetRegistrationSettings(GetRegistrationSettingsRequest) returns (GetRegistrationSettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:settings:read"]
+    };
+  }
+  rpc SetRegistrationSettings(SetRegistrationSettingsRequest) returns (SetRegistrationSettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:settings:write"]
+    };
+  }
 }
 
 // ---- tokens ----
@@ -139,13 +336,15 @@ message RevokeTokenResponse {}
 
 // ---- users ----
 
-// UserStatus is derived: DISABLED when the account is disabled, PENDING until the user has set
-// a password (a new user must do it through the welcome mail), ACTIVE otherwise.
+// UserStatus is derived: DISABLED when the account is disabled, PENDING_APPROVAL while a self-registered
+// user waits for an administrator, PENDING until the user has set a password (a new user must do it
+// through the welcome mail), ACTIVE otherwise.
 enum UserStatus {
   USER_STATUS_UNSPECIFIED = 0;
   USER_STATUS_PENDING = 10;
   USER_STATUS_ACTIVE = 20;
   USER_STATUS_DISABLED = 30;
+  USER_STATUS_PENDING_APPROVAL = 40;
 }
 
 message User {
@@ -186,6 +385,8 @@ message GetUserStatsResponse {
   int64 never_signed_in = 90;
   // Created since the start of this month (UTC).
   int64 created_this_month = 100;
+  // Self-registered, waiting for an administrator.
+  int64 awaiting_approval = 110;
 }
 
 message GetUserRequest {
@@ -291,6 +492,18 @@ message SendWelcomeRequest {
 
 message SendWelcomeResponse {}
 
+message ApproveUserRequest {
+  string user_id = 10;
+}
+
+message ApproveUserResponse {}
+
+message RejectUserRequest {
+  string user_id = 10;
+}
+
+message RejectUserResponse {}
+
 message GetMeRequest {}
 
 // GetMeResponse carries the picture as a data URI, like GetUser.
@@ -384,6 +597,9 @@ message Role {
   repeated string permissions = 30;
   // How many users and clients hold the role (filled by ListRoles and the role responses); a role that is held cannot be deleted.
   int64 assigned_count = 40;
+  // The permissions of `permissions` that no longer exist in the code (retired permissions and wildcards that
+  // cover nothing); they do nothing and may be removed.
+  repeated string retired_permissions = 50;
 }
 
 message CreateRoleRequest {
@@ -447,6 +663,12 @@ message Permission {
   string description = 20;
   // How many roles hold it.
   int64 role_count = 30;
+  // The service that defines it ("identity"); empty for a wildcard.
+  string service = 40;
+  // A generated wildcard ("identity:*:read"): not stored, listed so roles can be given it.
+  bool wildcard = 50;
+  // Removed from the code of its service but still held by a role: not enforced, not in tokens, hidden from the picker.
+  bool retired = 60;
 }
 
 message ListPermissionsRequest {
@@ -466,31 +688,27 @@ message ListPermissionsResponse {
   int64 total = 30;
 }
 
-message CreatePermissionRequest {
-  Permission permission = 10;
-}
-
-message CreatePermissionResponse {
-  Permission permission = 10;
-}
-
-message UpdatePermissionRequest {
-  // The name of the permission (the path parameter of the gateway is `permission`).
+// A permission a service declared, sent by RegisterPermissions.
+message PermissionDeclaration {
   string name = 10;
-  string permission = 20;
-  string description = 30;
+  string description = 20;
+  // The previous name: its role grants move to `name`.
+  string renamed_from = 30;
 }
 
-message UpdatePermissionResponse {
-  Permission permission = 10;
+message RegisterPermissionsRequest {
+  // The service that defines the permissions ("dictionary"); every name must start with "<service>:".
+  string service = 10;
+  repeated PermissionDeclaration permissions = 20;
 }
 
-message DeletePermissionRequest {
-  string name = 10;
-  string permission = 20;
+message RegisterPermissionsResponse {
+  int32 inserted = 10;
+  int32 updated = 20;
+  int32 retired = 30;
+  int32 deleted = 40;
+  int32 renamed = 50;
 }
-
-message DeletePermissionResponse {}
 
 message AssignRoleRequest {
   // Exactly one of the two.
@@ -697,4 +915,22 @@ message SetUIStyleRequest {
 message SetUIStyleResponse {
   string ui_style = 10;
   map<string, string> ui_palettes = 20;
+}
+
+message GetRegistrationSettingsRequest {}
+
+message GetRegistrationSettingsResponse {
+  // A self-registered user waits for an administrator (default true).
+  bool requires_approval = 10;
+  // IDENTITY_REGISTRATION_ENABLED of the server; read only. When false nobody can register at all.
+  bool registration_enabled = 20;
+}
+
+message SetRegistrationSettingsRequest {
+  bool requires_approval = 10;
+}
+
+message SetRegistrationSettingsResponse {
+  bool requires_approval = 10;
+  bool registration_enabled = 20;
 }

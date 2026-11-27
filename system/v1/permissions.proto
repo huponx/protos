@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package system.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/system/v1;systemv1";
+// Permissions checked by the gateway itself (not an RPC of a service).
+option (authz.v1.permissions) = {
+  permissions: [
+    {
+      name: "system:status:read"
+      description: "See the status of the applications (ArgoCD) on the admin home page"
+    }
+  ]
+};

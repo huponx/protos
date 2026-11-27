@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package authz.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/huponx/protogen/authz/v1;authzv1";
+
+// PermissionDef declares one permission of a service.
+message PermissionDef {
+  // Colon separated segments with no wildcard ("identity:user:read"); the first segment is the service.
+  string name = 10;
+  // Shown to administrators in the role editor.
+  string description = 20;
+  // The name this permission had before. At the next start the role grants of the old name move to this one and
+  // the old one is retired.
+  string renamed_from = 30;
+}
+
+// PermissionSet is the content of the `permissions` option of a service's permissions.proto: every permission
+// the service knows, in one file.
+message PermissionSet {
+  repeated PermissionDef permissions = 10;
+}
+
+// Rule says who may call an RPC. Set exactly one of any_of, all_of and public. Every name must be declared in the
+// permissions.proto of the service.
+message Rule {
+  // The caller needs at least one of these (one name is the common case).
+  repeated string any_of = 10;
+  // The caller needs every one of these.
+  repeated string all_of = 20;
+  // Any signed-in user may call it.
+  bool public = 30;
+}
+
+extend google.protobuf.FileOptions {
+  // The permissions a service defines; only in <service>/v1/permissions.proto.
+  PermissionSet permissions = 51001;
+}
+
+extend google.protobuf.MethodOptions {
+  // Required on every RPC of a service.
+  Rule rule = 51002;
+}

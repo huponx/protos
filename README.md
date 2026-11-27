@@ -4,14 +4,44 @@ gRPC contracts (`.proto` only). Generated stubs for every language live in [`pro
 
 ```
 buf.yaml                 # lint + breaking rules (buf v2)
-buf.gen.<lang>.yaml      # one generation template per language: go java scala rust
+buf.gen.<lang>.yaml      # one generation template per language: go java scala rust ts
 ping/v1/ping.proto
 courier/v1/courier.proto
 dictionary/v1/dictionary.proto
+dictionary/v1/permissions.proto   # every permission of the service, in one file
+identity/v1/{identity,permissions}.proto
+bill/v1/permissions.proto         # no RPCs yet: the web app and the portal read the names
+system/v1/permissions.proto       # checked by the gateway itself
+authz/v1/options.proto            # the options below
 scripts/                 # verify.sh, generate.sh, lib.sh, install-scalapb.sh
+tools/                   # protoc-gen-ts-permissions: the generator of the TypeScript package
 ```
 
 Add a new API by adding `bill/v1/bill.proto` here. Do not create a new repo.
+
+## Permissions
+
+A permission string is defined **once**, in the `permissions.proto` of its service, with the options of [`authz/v1/options.proto`](authz/v1/options.proto):
+
+```proto
+// identity/v1/permissions.proto
+option (authz.v1.permissions) = {
+  permissions: [
+    {name: "identity:user:read", description: "List and read users"},
+    {name: "identity:user:approve", description: "Approve or reject self-registered users"}
+  ]
+};
+
+// identity/v1/identity.proto, on every RPC (exactly one of any_of, all_of, public)
+rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+  option (authz.v1.rule) = {any_of: ["identity:user:read", "identity:user:approve"]};
+}
+```
+
+- `any_of`: the caller needs at least one; `all_of`: every one; `public`: any signed-in user. A name must be declared in the permissions file of the service, and start with the service name.
+- A `PermissionDef` may say `renamed_from: "old:name"`: at the next start of the service the role grants of the old name move to the new one.
+- Services derive their method map from these options (`gocommon/grpcserver.PermissionsFromProto`) and fail a test for an RPC without a rule (`grpcserver.CheckCoverage`). The gateway reads the same rules from `descriptors.binpb`. Identity saves the declared permissions in its catalog at start (services other than identity call `RegisterPermissions`), and the web apps get the names as `P.identity.userRead` from the TypeScript package.
+- Removing a permission that a role still holds retires it instead of deleting it: see the README of identity.
 
 ## Pipeline
 
@@ -118,6 +148,8 @@ Go requires a `/vN` suffix from major 2 on. The workflow handles it from the maj
 ScalaPB has no remote plugin on buf.build. `protoc-gen-scala` must be on `PATH`; [`scripts/install-scalapb.sh`](scripts/install-scalapb.sh) downloads the self-contained executable from Maven Central (needs `curl` and a JDK). CI does this itself.
 
 ### Add a language
+
+The `ts` language is not a stub generator: `tools/protoc-gen-ts-permissions` (Go, built by `scripts/generate.sh ts`, nothing to install) reads the `permissions.proto` files and writes `ts/src/permissions.ts` (`P`, the `Permission` union, `PERMISSIONS`) of the package `@huponx/protogen` in protogen. The web apps take it as a dependency, so a removed or mistyped permission fails `tsc` there.
 
 1. Add `buf.gen.<lang>.yaml` here (`out:` is relative to the protogen root) and the language to `ALL_LANGS`, `stub_dir` and `lang_root` in [`scripts/lib.sh`](scripts/lib.sh).
 2. In protogen: add `<lang>/` with its build file, a case in the shared `lang-setup` and `lang-compile` actions of `huponx/actions`, and the name in `meta` of `generate.yml` and the matrix of `check.yml`.
