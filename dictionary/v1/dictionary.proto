@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package dictionary.v1;
 
+import "authz/v1/options.proto";
+
 option go_package = "github.com/huponx/protogen/dictionary/v1;dictionaryv1";
 
 // DictionaryService looks words up and keeps a per-user list of saved words that can be exported
@@ -9,135 +11,271 @@ option go_package = "github.com/huponx/protogen/dictionary/v1;dictionaryv1";
 // needs a permission, see the comment of the method.
 service DictionaryService {
   // LookupWord returns the entry of one word. Permission: dictionary:word:read.
-  rpc LookupWord(LookupWordRequest) returns (LookupWordResponse);
+  rpc LookupWord(LookupWordRequest) returns (LookupWordResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // LookupWords returns the entries of several words (at most 20). Words without an entry are
   // listed in not_found instead of failing the call. Permission: dictionary:word:read.
-  rpc LookupWords(LookupWordsRequest) returns (LookupWordsResponse);
+  rpc LookupWords(LookupWordsRequest) returns (LookupWordsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
 
   // SaveWord adds a word to the user's list (an upsert; an exported word becomes new again). Fails with
   // RESOURCE_EXHAUSTED (MAX_SAVED_WORDS_REACHED) when the list is full. Permission: dictionary:word:write.
-  rpc SaveWord(SaveWordRequest) returns (SaveWordResponse);
+  rpc SaveWord(SaveWordRequest) returns (SaveWordResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // ListSavedWords lists the words of the list, newest first: the new ones and the exported ones that were
   // kept (remove after export is off). Permission: dictionary:word:read.
-  rpc ListSavedWords(ListSavedWordsRequest) returns (ListSavedWordsResponse);
+  rpc ListSavedWords(ListSavedWordsRequest) returns (ListSavedWordsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // CheckSavedWords tells which of up to 100 words are in the list of the user, with their categories: the lookup
   // marks the words that are saved without reading the whole list. Permission: dictionary:word:read.
-  rpc CheckSavedWords(CheckSavedWordsRequest) returns (CheckSavedWordsResponse);
+  rpc CheckSavedWords(CheckSavedWordsRequest) returns (CheckSavedWordsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // DeleteSavedWord removes a word of the list. Permission: dictionary:word:write.
-  rpc DeleteSavedWord(DeleteSavedWordRequest) returns (DeleteSavedWordResponse);
+  rpc DeleteSavedWord(DeleteSavedWordRequest) returns (DeleteSavedWordResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // ExportAnki builds an Anki deck (.apkg) from the new words (or all of the list, see scope) and marks
   // them exported. When remove after export is in effect (system AND user) they also leave the list.
   // Fails with INVALID_ARGUMENT (NO_WORDS_TO_EXPORT) when there is nothing to export.
   // Permission: dictionary:word:write.
-  rpc ExportAnki(ExportAnkiRequest) returns (ExportAnkiResponse);
+  rpc ExportAnki(ExportAnkiRequest) returns (ExportAnkiResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // CreateDeckLink does what ExportAnki does (builds the deck, marks the words exported) but keeps
   // the .apkg for a short time behind a random token instead of returning it, so that an Anki app
   // can import it from a link ("download link" of AnkiMobile). A link of the same user created
   // earlier is replaced. Permission: dictionary:word:write.
-  rpc CreateDeckLink(CreateDeckLinkRequest) returns (CreateDeckLinkResponse);
+  rpc CreateDeckLink(CreateDeckLinkRequest) returns (CreateDeckLinkResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // StartExport starts a job that packs a list that is too long for ExportAnki (EXPORT_USE_JOB) in parts,
   // each a deck file of at most the size limit, and marks the words of a part exported when the part is
   // done. The words are the new ones (or all, see scope), of the category or of no category. One job at a
   // time per user: another one fails with EXPORT_JOB_ACTIVE. Permission: dictionary:word:write.
-  rpc StartExport(StartExportRequest) returns (StartExportResponse);
+  rpc StartExport(StartExportRequest) returns (StartExportResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // GetExport returns the state of a job and its parts so far. The id "latest" (or empty) is the job started
   // last by the user. NOT_FOUND when there is none. Permission: dictionary:word:write.
-  rpc GetExport(GetExportRequest) returns (GetExportResponse);
+  rpc GetExport(GetExportRequest) returns (GetExportResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // CancelExport stops a queued or running job; the parts made so far stay downloadable until the job
   // expires. Permission: dictionary:word:write.
-  rpc CancelExport(CancelExportRequest) returns (CancelExportResponse);
+  rpc CancelExport(CancelExportRequest) returns (CancelExportResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // CreateExportPartLink makes the download link of a part of a job (the same anonymous download as
   // CreateDeckLink, but it works many times until the job expires). Permission: dictionary:word:write.
-  rpc CreateExportPartLink(CreateExportPartLinkRequest) returns (CreateExportPartLinkResponse);
+  rpc CreateExportPartLink(CreateExportPartLinkRequest) returns (CreateExportPartLinkResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // DownloadDeck returns the deck of a link and burns the link (it works once). It is called by the
   // gateway for the anonymous download request, so it takes a service token (client credentials)
   // and refuses user tokens. NOT_FOUND when the token is unknown, used or expired.
-  rpc DownloadDeck(DownloadDeckRequest) returns (DownloadDeckResponse);
+  rpc DownloadDeck(DownloadDeckRequest) returns (DownloadDeckResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // DownloadExportPart streams the part of an export job (see CreateExportPartLink) in chunks of at most 256 KiB, so
   // a part larger than a gRPC message travels without being held whole: the first chunk carries filename and size,
   // the next ones only data. Like DownloadDeck it takes a service token (the gateway). NOT_FOUND when the token is
   // unknown or expired.
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
-  rpc DownloadExportPart(DownloadExportPartRequest) returns (stream DownloadChunk);
+  rpc DownloadExportPart(DownloadExportPartRequest) returns (stream DownloadChunk) {
+    option (authz.v1.rule) = {public: true};
+  }
   // ListCategories lists the categories of the user (by name) with their word counts. Permission: dictionary:word:read.
-  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // CreateCategory adds a category. Fails with ALREADY_EXISTS (CATEGORY_EXISTS) for a name the user has (case-insensitive),
   // RESOURCE_EXHAUSTED (CATEGORY_LIMIT_REACHED) at 50 categories and INVALID_ARGUMENT for a name of 0 or more
   // than 40 characters. Permission: dictionary:word:write.
-  rpc CreateCategory(CreateCategoryRequest) returns (CreateCategoryResponse);
+  rpc CreateCategory(CreateCategoryRequest) returns (CreateCategoryResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // RenameCategory renames one. NOT_FOUND for an unknown id, ALREADY_EXISTS (CATEGORY_EXISTS) for a name in use.
   // Permission: dictionary:word:write.
-  rpc RenameCategory(RenameCategoryRequest) returns (RenameCategoryResponse);
+  rpc RenameCategory(RenameCategoryRequest) returns (RenameCategoryResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // DeleteCategory deletes the category only; its words stay in the list. NOT_FOUND for an unknown id.
   // Permission: dictionary:word:write.
-  rpc DeleteCategory(DeleteCategoryRequest) returns (DeleteCategoryResponse);
+  rpc DeleteCategory(DeleteCategoryRequest) returns (DeleteCategoryResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // UpdateWordCategories adds the words to some categories and takes them out of others, in one step. It does not
   // touch the card or the exported flag. NOT_FOUND for an unknown category; words that are not in the list are
   // ignored. Permission: dictionary:word:write.
-  rpc UpdateWordCategories(UpdateWordCategoriesRequest) returns (UpdateWordCategoriesResponse);
+  rpc UpdateWordCategories(UpdateWordCategoriesRequest) returns (UpdateWordCategoriesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // RemoveExportedWords takes the exported words out of the list (the new ones stay). The dict app calls it
   // when the user answers "remove them" after remove after export came on. Permission: dictionary:word:write.
-  rpc RemoveExportedWords(RemoveExportedWordsRequest) returns (RemoveExportedWordsResponse);
+  rpc RemoveExportedWords(RemoveExportedWordsRequest) returns (RemoveExportedWordsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
 
   // UploadImage stores an image of a card (png, jpeg, gif or webp; never svg). The service shrinks it
   // (longest side at most DICTIONARY_IMAGE_MAX_DIM), re-encodes it without metadata and returns the id that
   // the card content refers to as dictimg:<id>. The same image of the same user gets the same id. Fails with
   // INVALID_ARGUMENT (IMAGE_UNSUPPORTED, IMAGE_TOO_LARGE), RESOURCE_EXHAUSTED (IMAGE_QUOTA_EXCEEDED) or
   // FAILED_PRECONDITION (IMAGES_DISABLED, no image directory). Permission: dictionary:word:write.
-  rpc UploadImage(UploadImageRequest) returns (UploadImageResponse);
+  rpc UploadImage(UploadImageRequest) returns (UploadImageResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // GetImage returns an image of the user (NOT_FOUND for an unknown id or one of another user).
   // Permission: dictionary:word:read.
-  rpc GetImage(GetImageRequest) returns (GetImageResponse);
+  rpc GetImage(GetImageRequest) returns (GetImageResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
 
   // UploadAudio stores an audio file of a card (mp3, ogg, wav or m4a), as it is: it is not re-encoded. The
   // card refers to it in audio_uk / audio_us as dictaud:<id>. The same file of the same user gets the same
   // id. Fails with INVALID_ARGUMENT (AUDIO_UNSUPPORTED, AUDIO_TOO_LARGE), RESOURCE_EXHAUSTED
   // (AUDIO_QUOTA_EXCEEDED) or FAILED_PRECONDITION (AUDIO_DISABLED, no files directory).
   // Permission: dictionary:word:write.
-  rpc UploadAudio(UploadAudioRequest) returns (UploadAudioResponse);
+  rpc UploadAudio(UploadAudioRequest) returns (UploadAudioResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:write"]
+    };
+  }
   // GetAudio returns an audio file of the user (NOT_FOUND for an unknown id or one of another user).
   // Permission: dictionary:word:read.
-  rpc GetAudio(GetAudioRequest) returns (GetAudioResponse);
+  rpc GetAudio(GetAudioRequest) returns (GetAudioResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
 
   // GetReviewQueue returns the cards to review: the ones that are due first (earliest due first), then new
   // words (oldest first) up to the daily limit of the user, cut to limit cards. Only words still in the list.
   // Permission: dictionary:word:read.
-  rpc GetReviewQueue(GetReviewQueueRequest) returns (GetReviewQueueResponse);
+  rpc GetReviewQueue(GetReviewQueueRequest) returns (GetReviewQueueResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // SubmitReview grades a card and schedules its next review (SM-2 or FSRS, as the user chose). NOT_FOUND when the word is not in the
   // list, INVALID_ARGUMENT for an unknown grade. Permission: dictionary:word:read.
-  rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse);
+  rpc SubmitReview(SubmitReviewRequest) returns (SubmitReviewResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // AddReviewBonus raises the daily limits of the review for the next 24 hours by the given numbers, without
   // touching the settings; a grant while a bonus runs adds up and renews the 24 hours. INVALID_ARGUMENT when a number
   // is negative or above 9999, or both are 0. Permission: dictionary:word:read.
-  rpc AddReviewBonus(AddReviewBonusRequest) returns (AddReviewBonusResponse);
+  rpc AddReviewBonus(AddReviewBonusRequest) returns (AddReviewBonusResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // OptimizeReviewParameters fits the FSRS parameters to the review history of the user and stores them when they
   // predict better than the defaults (restore_defaults = true forgets them instead). FAILED_PRECONDITION when there are too few
   // reviews, RESOURCE_EXHAUSTED when called again within a minute or while another run is going.
   // Permission: dictionary:word:read.
-  rpc OptimizeReviewParameters(OptimizeReviewParametersRequest) returns (OptimizeReviewParametersResponse);
+  rpc OptimizeReviewParameters(OptimizeReviewParametersRequest) returns (OptimizeReviewParametersResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
 
   // GetSettings returns the settings of the whole system. Permission: dictionary:settings:read.
-  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:read"]
+    };
+  }
   // UpdateSettings changes them (all fields are written; only the ones that differ are stored). Fails with
   // INVALID_ARGUMENT when a value is out of range or no dictionary stays enabled.
   // Permission: dictionary:settings:write.
-  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:write"]
+    };
+  }
   // GetUserQuota returns what a user stores (content, images, audio), the limits an administrator set for the
   // user and the limits in effect. NOT_FOUND for an unknown user. Permission: dictionary:settings:read.
-  rpc GetUserQuota(GetUserQuotaRequest) returns (GetUserQuotaResponse);
+  rpc GetUserQuota(GetUserQuotaRequest) returns (GetUserQuotaResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:read"]
+    };
+  }
   // SetUserQuota sets the own limits of a user (0 for a kind: the limit of the system again). INVALID_ARGUMENT
   // for a limit above the ceiling of the system settings. Permission: dictionary:settings:write.
-  rpc SetUserQuota(SetUserQuotaRequest) returns (SetUserQuotaResponse);
+  rpc SetUserQuota(SetUserQuotaRequest) returns (SetUserQuotaResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:write"]
+    };
+  }
   // GetMyStorage returns what the user stores and the limit of each kind, own limit included.
   // Permission: dictionary:word:read.
-  rpc GetMyStorage(GetMyStorageRequest) returns (GetMyStorageResponse);
+  rpc GetMyStorage(GetMyStorageRequest) returns (GetMyStorageResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // GetMySettings returns the preferences of the user together with the settings of the system, which
   // tell what the user may choose from. Permission: dictionary:word:read.
-  rpc GetMySettings(GetMySettingsRequest) returns (GetMySettingsResponse);
+  rpc GetMySettings(GetMySettingsRequest) returns (GetMySettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
   // UpdateMySettings stores the preferences of the user (kept by identity). INVALID_ARGUMENT when a value
   // is out of range, no dictionary is left enabled or the default is not an enabled one.
   // Permission: dictionary:word:read.
-  rpc UpdateMySettings(UpdateMySettingsRequest) returns (UpdateMySettingsResponse);
+  rpc UpdateMySettings(UpdateMySettingsRequest) returns (UpdateMySettingsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
 }
 
 // Dictionary selects the source of a lookup.

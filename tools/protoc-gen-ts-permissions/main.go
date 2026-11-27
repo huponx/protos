@@ -1,0 +1,204 @@
+// protoc-gen-ts-permissions is a protoc plugin that writes permissions.ts, the permission names of every
+// permissions.proto (the `authz.v1.permissions` file option) as TypeScript constants:
+//
+//	export const P = { identity: { userRead: "identity:user:read", ... }, ... } as const;
+//	export type Permission = ...;           // the union of every name
+//
+// The web apps use P.identity.userRead instead of a string literal, so tsc fails on a name that no longer exists.
+// It reads the option through the descriptors in the request (no generated Go code of authz/v1 needed).
+//
+// Parameter: out=<file> (default permissions.ts).
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+	"unicode"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/pluginpb"
+)
+
+const permissionsExt protoreflect.FullName = "authz.v1.permissions"
+
+type permission struct {
+	Name, Description string
+}
+
+func main() {
+	in, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fail(err)
+	}
+	var req pluginpb.CodeGeneratorRequest
+	if err := proto.Unmarshal(in, &req); err != nil {
+		fail(err)
+	}
+	out, err := generate(&req)
+	if err != nil {
+		resp := &pluginpb.CodeGeneratorResponse{Error: proto.String(err.Error())}
+		write(resp)
+		return
+	}
+	write(out)
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "protoc-gen-ts-permissions:", err)
+	os.Exit(1)
+}
+
+func write(resp *pluginpb.CodeGeneratorResponse) {
+	resp.SupportedFeatures = proto.Uint64(uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL))
+	b, err := proto.Marshal(resp)
+	if err != nil {
+		fail(err)
+	}
+	if _, err := os.Stdout.Write(b); err != nil {
+		fail(err)
+	}
+}
+
+func generate(req *pluginpb.CodeGeneratorRequest) (*pluginpb.CodeGeneratorResponse, error) {
+	file := "permissions.ts"
+	for _, kv := range strings.Split(req.GetParameter(), ",") {
+		if v, ok := strings.CutPrefix(kv, "out="); ok && v != "" {
+			file = v
+		}
+	}
+	files, err := protodesc.NewFiles(&descriptorpb.FileDescriptorSet{File: req.GetProtoFile()})
+	if err != nil {
+		return nil, err
+	}
+	xd, err := files.FindDescriptorByName(permissionsExt)
+	if err != nil {
+		return nil, fmt.Errorf("%s is not defined: buf must build authz/v1/options.proto with the files: %w", permissionsExt, err)
+	}
+	ext, ok := xd.(protoreflect.ExtensionDescriptor)
+	if !ok {
+		return nil, fmt.Errorf("%s is not an extension", permissionsExt)
+	}
+	xt := dynamicpb.NewExtensionType(ext)
+	types := new(protoregistry.Types)
+	if err := types.RegisterExtension(xt); err != nil {
+		return nil, err
+	}
+
+	byService := map[string][]permission{}
+	for _, name := range req.GetFileToGenerate() {
+		fdp := find(req.GetProtoFile(), name)
+		if fdp == nil || fdp.GetOptions() == nil {
+			continue
+		}
+		raw, err := proto.Marshal(fdp.GetOptions())
+		if err != nil {
+			return nil, err
+		}
+		// a dynamic message of the FileOptions of the request, so that it and the extension share descriptors
+		opts := dynamicpb.NewMessage(ext.ContainingMessage())
+		if err := (proto.UnmarshalOptions{Resolver: types}).Unmarshal(raw, opts); err != nil {
+			return nil, err
+		}
+		if !opts.Has(xt.TypeDescriptor()) {
+			continue
+		}
+		set := opts.Get(xt.TypeDescriptor()).Message()
+		list := set.Get(set.Descriptor().Fields().ByName("permissions")).List()
+		for i := 0; i < list.Len(); i++ {
+			def := list.Get(i).Message()
+			n := def.Get(def.Descriptor().Fields().ByName("name")).String()
+			d := def.Get(def.Descriptor().Fields().ByName("description")).String()
+			svc, _, _ := strings.Cut(n, ":")
+			byService[svc] = append(byService[svc], permission{Name: n, Description: d})
+		}
+	}
+	src, err := render(byService)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginpb.CodeGeneratorResponse{File: []*pluginpb.CodeGeneratorResponse_File{{Name: proto.String(file), Content: proto.String(src)}}}, nil
+}
+
+func find(files []*descriptorpb.FileDescriptorProto, name string) *descriptorpb.FileDescriptorProto {
+	for _, f := range files {
+		if f.GetName() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// key turns the part of a name after the service into a camelCase key: "user:read" -> "userRead".
+func key(rest string) string {
+	var b strings.Builder
+	upper := false
+	for _, r := range rest {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			upper = true
+			continue
+		}
+		if upper && b.Len() > 0 {
+			r = unicode.ToUpper(r)
+		}
+		upper = false
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func render(byService map[string][]permission) (string, error) {
+	services := make([]string, 0, len(byService))
+	for s := range byService {
+		services = append(services, s)
+	}
+	sort.Strings(services)
+
+	var b strings.Builder
+	b.WriteString("// Code generated by protoc-gen-ts-permissions from the permissions.proto files. DO NOT EDIT.\n")
+	b.WriteString("// A permission is renamed or removed in its permissions.proto; this file follows with the next protogen release.\n\n")
+	b.WriteString("export const P = {\n")
+	var all []string
+	for _, s := range services {
+		list := byService[s]
+		sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+		fmt.Fprintf(&b, "  %s: {\n", s)
+		seen := map[string]string{}
+		for _, p := range list {
+			rest := strings.TrimPrefix(p.Name, s+":")
+			k := key(rest)
+			if k == "" {
+				return "", fmt.Errorf("permission %q has no usable key", p.Name)
+			}
+			if other, dup := seen[k]; dup {
+				return "", fmt.Errorf("permissions %q and %q have the same key %q", other, p.Name, k)
+			}
+			seen[k] = p.Name
+			if p.Description != "" {
+				fmt.Fprintf(&b, "    /** %s */\n", strings.ReplaceAll(p.Description, "*/", "* /"))
+			}
+			fmt.Fprintf(&b, "    %s: %q,\n", k, p.Name)
+			all = append(all, p.Name)
+		}
+		b.WriteString("  },\n")
+	}
+	b.WriteString("} as const;\n\n")
+	b.WriteString("/** Every declared permission name. */\n")
+	b.WriteString("export type Permission = { [S in keyof typeof P]: (typeof P)[S][keyof (typeof P)[S]] }[keyof typeof P];\n\n")
+	b.WriteString("/** Every declared permission name, sorted. */\n")
+	sort.Strings(all)
+	b.WriteString("export const PERMISSIONS: readonly Permission[] = [\n")
+	for _, n := range all {
+		fmt.Fprintf(&b, "  %q,\n", n)
+	}
+	b.WriteString("];\n\n")
+	b.WriteString("export function isPermission(name: string): name is Permission {\n  return (PERMISSIONS as readonly string[]).includes(name);\n}\n")
+	return b.String(), nil
+}

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package bill.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/bill/v1;billv1";
+// Permissions of the bill app. It has no gRPC service yet; the web app and the portal read the names.
+option (authz.v1.permissions) = {
+  permissions: [
+    {
+      name: "bill:invoice:read"
+      description: "See the invoices of the bill app"
+    }
+  ]
+};

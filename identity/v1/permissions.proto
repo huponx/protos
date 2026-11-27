@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package identity.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/identity/v1;identityv1";
+// Every permission of identity, in one place. identity saves them in its catalog at start; the gateway and the
+// web apps read the same file. An RPC names them in its `authz.v1.rule` option (identity.proto).
+option (authz.v1.permissions) = {
+  permissions: [
+    {
+      name: "identity:user:read"
+      description: "List and read users"
+    },
+    {
+      name: "identity:user:write"
+      description: "Create and edit users, send welcome and reset emails"
+    },
+    {
+      name: "identity:user:approve"
+      description: "Approve or reject self-registered users"
+    },
+    {
+      name: "identity:role:read"
+      description: "List roles"
+    },
+    {
+      name: "identity:role:write"
+      description: "Create roles and change what they allow, assign roles"
+    },
+    {
+      name: "identity:permission:read"
+      description: "List the permissions and check what a user holds"
+    },
+    {
+      name: "identity:permission:register"
+      description: "Register the permissions of a service at its start"
+    },
+    {
+      name: "identity:client:read"
+      description: "List clients"
+    },
+    {
+      name: "identity:client:write"
+      description: "Create clients and rotate their secrets"
+    },
+    {
+      name: "identity:exchange:read"
+      description: "List token exchange policies"
+    },
+    {
+      name: "identity:exchange:write"
+      description: "Set and delete token exchange policies"
+    },
+    {
+      name: "identity:mfa:read"
+      description: "Read the multi-factor state of users"
+    },
+    {
+      name: "identity:mfa:write"
+      description: "Change the multi-factor settings of users"
+    },
+    {
+      name: "identity:token:read"
+      description: "Introspect tokens"
+    },
+    {
+      name: "identity:token:write"
+      description: "Revoke tokens"
+    },
+    {
+      name: "identity:settings:read"
+      description: "See the system settings of identity (look of the web apps)"
+    },
+    {
+      name: "identity:settings:write"
+      description: "Change the system settings of identity (look of the web apps)"
+    }
+  ]
+};

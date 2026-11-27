@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package dictionary.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/dictionary/v1;dictionaryv1";
+// Every permission of the dictionary, in one place. The service registers them with identity at start.
+option (authz.v1.permissions) = {
+  permissions: [
+    {
+      name: "dictionary:word:read"
+      description: "Look words up and list the saved words"
+    },
+    {
+      name: "dictionary:word:write"
+      description: "Save and delete words, export them as an Anki deck"
+    },
+    {
+      name: "dictionary:settings:read"
+      description: "See the settings of the dictionary (limits, export, dictionaries)"
+    },
+    {
+      name: "dictionary:settings:write"
+      description: "Change the settings of the dictionary"
+    }
+  ]
+};
