@@ -53,6 +53,18 @@ service IdentityService {
       any_of: ["identity:user:write"]
     };
   }
+  // ListUserSessions lists the SSO sessions (devices) of a user; `current` is always false. RevokeUserSessions ends all of
+  // them, revokes the refresh tokens and the access tokens issued so far (like disabling the user, without disabling).
+  rpc ListUserSessions(ListUserSessionsRequest) returns (ListUserSessionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:read"]
+    };
+  }
+  rpc RevokeUserSessions(RevokeUserSessionsRequest) returns (RevokeUserSessionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["identity:user:write"]
+    };
+  }
   // DeleteUser deletes the account (soft: see DeleteUserRequest).
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
     option (authz.v1.rule) = {
@@ -141,6 +153,39 @@ service IdentityService {
   }
   // DisableMyMFA turns MFA off after the password and a code (or a recovery code); refused when MFA is required for the user.
   rpc DisableMyMFA(DisableMyMFARequest) returns (DisableMyMFAResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  // The own passkeys (WebAuthn credentials), a way to sign in next to the password. The browser runs the ceremony: Begin
+  // returns the options for navigator.credentials.create (as the JSON of the web API) and Finish takes the answer back, so
+  // the same steps as the account page of the sign in app. Adding and deleting need the current password. They answer
+  // NOT_FOUND "passkeys_off" when the server has passkeys turned off.
+  rpc ListMyPasskeys(ListMyPasskeysRequest) returns (ListMyPasskeysResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc BeginMyPasskey(BeginMyPasskeyRequest) returns (BeginMyPasskeyResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc FinishMyPasskey(FinishMyPasskeyRequest) returns (FinishMyPasskeyResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc RenameMyPasskey(RenameMyPasskeyRequest) returns (RenameMyPasskeyResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc DeleteMyPasskey(DeleteMyPasskeyRequest) returns (DeleteMyPasskeyResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  // The own SSO sessions, one per sign in on a browser or device. ListMySessions marks the one of the caller (the sid of
+  // its token) as current. RevokeMySession ends one (NOT_FOUND "session_not_found" for an unknown id or one of another
+  // user); revoking the current one signs the caller out. RevokeMyOtherSessions keeps the current one. Ending a session
+  // revokes its refresh tokens and signs out the applications that used it (back-channel logout); access tokens already
+  // issued live until they expire (IDENTITY_ACCESS_TOKEN_TTL) where a service verifies them locally.
+  rpc ListMySessions(ListMySessionsRequest) returns (ListMySessionsResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc RevokeMySession(RevokeMySessionRequest) returns (RevokeMySessionResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc RevokeMyOtherSessions(RevokeMyOtherSessionsRequest) returns (RevokeMyOtherSessionsResponse) {
     option (authz.v1.rule) = {public: true};
   }
   // The settings the signed-in user keeps for one application ("dictionary"): a JSON object that
@@ -570,6 +615,120 @@ message DisableMyMFARequest {
 
 message DisableMyMFAResponse {}
 
+message Passkey {
+  string id = 10;
+  string name = 20;
+  int64 created_at = 30;
+  // Unix seconds of the last sign in with it; 0 when never used.
+  int64 last_used_at = 40;
+  // The passkey is synced between the devices of its owner (backup eligible), not bound to one.
+  bool synced = 50;
+}
+
+message ListMyPasskeysRequest {}
+
+message ListMyPasskeysResponse {
+  repeated Passkey passkeys = 10;
+  // How many passkeys a user may have.
+  int32 max = 20;
+}
+
+message BeginMyPasskeyRequest {
+  // The current password.
+  string password = 10;
+}
+
+message BeginMyPasskeyResponse {
+  // Comes back in FinishMyPasskey; valid for 5 minutes, once.
+  string ceremony_id = 10;
+  // The JSON for navigator.credentials.create (PublicKeyCredentialCreationOptionsJSON).
+  string options_json = 20;
+}
+
+message FinishMyPasskeyRequest {
+  string ceremony_id = 10;
+  // The JSON of the credential the browser returned (RegistrationResponseJSON).
+  string credential_json = 20;
+  // 1 to 60 characters.
+  string name = 30;
+}
+
+message FinishMyPasskeyResponse {
+  Passkey passkey = 10;
+}
+
+message RenameMyPasskeyRequest {
+  string id = 10;
+  string name = 20;
+}
+
+message RenameMyPasskeyResponse {}
+
+message DeleteMyPasskeyRequest {
+  string id = 10;
+  // The current password.
+  string password = 20;
+}
+
+message DeleteMyPasskeyResponse {}
+
+// An SSO session: one sign in on one browser or device. The browser, os and device are read from the User-Agent when
+// listed; all are empty for a session that was created before they were recorded.
+message Session {
+  // The public id of the session (the sid of its tokens).
+  string id = 10;
+  string ip = 20;
+  string browser = 30;
+  // The major version of the browser.
+  string browser_version = 35;
+  string os = 40;
+  // desktop, mobile, tablet or unknown.
+  string device = 50;
+  // How the user signed in: pwd, otp, swk, hwk, mfa.
+  repeated string amr = 60;
+  // Unix seconds.
+  int64 created_at = 70;
+  // Unix seconds of the last activity (at most a minute behind); 0 when unknown.
+  int64 last_seen_at = 80;
+  // The session of the caller.
+  bool current = 90;
+}
+
+message ListMySessionsRequest {}
+
+message ListMySessionsResponse {
+  // Newest first.
+  repeated Session sessions = 10;
+}
+
+message RevokeMySessionRequest {
+  string id = 10;
+}
+
+message RevokeMySessionResponse {}
+
+message RevokeMyOtherSessionsRequest {}
+
+message RevokeMyOtherSessionsResponse {
+  int32 revoked = 10;
+}
+
+message ListUserSessionsRequest {
+  string user_id = 10;
+}
+
+message ListUserSessionsResponse {
+  repeated Session sessions = 10;
+}
+
+message RevokeUserSessionsRequest {
+  string user_id = 10;
+}
+
+message RevokeUserSessionsResponse {
+  int32 revoked = 10;
+}
+
 message GetMyUserSettingsRequest {
   // Short lowercase name of the application: a letter, then letters, digits, "_" or "-" (32 at most).
   string app = 10;
@@ -872,6 +1031,8 @@ message GetUserMFAResponse {
   // The server mode: off, optional or required.
   string mode = 30;
   int32 recovery_codes_left = 40;
+  // How many passkeys the user has (ResetUserMFA removes them too).
+  int32 passkey_count = 50;
 }
 
 message SetUserMFARequest {

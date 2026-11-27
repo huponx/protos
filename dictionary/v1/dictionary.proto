@@ -24,6 +24,14 @@ service DictionaryService {
     };
   }
 
+  // ListDictionaries lists the dictionaries, by group, with whether each is on for the caller (the system and the
+  // user switches). Permission: dictionary:word:read.
+  rpc ListDictionaries(ListDictionariesRequest) returns (ListDictionariesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:word:read"]
+    };
+  }
+
   // SaveWord adds a word to the user's list (an upsert; an exported word becomes new again). Fails with
   // RESOURCE_EXHAUSTED (MAX_SAVED_WORDS_REACHED) when the list is full. Permission: dictionary:word:write.
   rpc SaveWord(SaveWordRequest) returns (SaveWordResponse) {
@@ -254,6 +262,14 @@ service DictionaryService {
       any_of: ["dictionary:settings:write"]
     };
   }
+  // RecalculateUserStorage recomputes the storage counters of a user from the rows (content, images, audio, and
+  // the number of words in the list) and returns them with what they were. NOT_FOUND user_not_found.
+  // Permission: dictionary:settings:write.
+  rpc RecalculateUserStorage(RecalculateUserStorageRequest) returns (RecalculateUserStorageResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:write"]
+    };
+  }
   // GetMyStorage returns what the user stores and the limit of each kind, own limit included.
   // Permission: dictionary:word:read.
   rpc GetMyStorage(GetMyStorageRequest) returns (GetMyStorageResponse) {
@@ -278,13 +294,29 @@ service DictionaryService {
   }
 }
 
-// Dictionary selects the source of a lookup.
-enum Dictionary {
-  DICTIONARY_UNSPECIFIED = 0;
-  // English definitions.
-  DICTIONARY_ENGLISH = 10;
-  // English words with Vietnamese meanings.
-  DICTIONARY_ENGLISH_VIETNAMESE = 20;
+// DictionaryInfo is one dictionary of the registry.
+message DictionaryInfo {
+  // The id a lookup takes ("english", "english-vietnamese", ...).
+  string id = 10;
+  // The group the dictionaries of a saved word belong to.
+  string group = 20;
+  // Language of the words and of the meanings (BCP 47 primary subtag, "en", "vi", ...).
+  string source = 30;
+  string target = 40;
+  // On for the caller: the system and the user switches both allow it.
+  bool enabled = 50;
+}
+
+// DictionaryGroup is the dictionaries that merge into one card.
+message DictionaryGroup {
+  string id = 10;
+  repeated DictionaryInfo dictionaries = 20;
+}
+
+message ListDictionariesRequest {}
+message ListDictionariesResponse {
+  // In the order of the registry.
+  repeated DictionaryGroup groups = 10;
 }
 
 message Meaning {
@@ -307,9 +339,10 @@ message Word {
 }
 
 message LookupWordRequest {
+  reserved 20;
   string word = 10;
-  // UNSPECIFIED means DICTIONARY_ENGLISH.
-  Dictionary dictionary = 20;
+  // The id of a dictionary, see ListDictionaries. Required (UNKNOWN_DICTIONARY when empty or not registered).
+  string dictionary = 30;
 }
 
 message LookupWordResponse {
@@ -317,8 +350,10 @@ message LookupWordResponse {
 }
 
 message LookupWordsRequest {
+  reserved 20;
   repeated string words = 10;
-  Dictionary dictionary = 20;
+  // The id of a dictionary, see ListDictionaries. Required.
+  string dictionary = 30;
 }
 
 message LookupWordsResponse {
@@ -345,6 +380,8 @@ message SavedWord {
   string next_review_at = 80;
   // The word is in the learning steps (not yet graduated to the long intervals).
   bool learning = 90;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 100;
 }
 
 message SaveWordRequest {
@@ -354,6 +391,8 @@ message SaveWordRequest {
   string audio_us = 40;
   // Categories to add the word to. Only adds: the ones the word already has stay.
   repeated string category_ids = 50;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 60;
 }
 
 message SaveWordResponse {
@@ -374,6 +413,8 @@ message ListSavedWordsRequest {
   string category_id = 40;
   // Only the words that have no category (category_id is then ignored).
   bool uncategorized = 50;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 60;
 }
 
 message ListSavedWordsResponse {
@@ -385,12 +426,15 @@ message ListSavedWordsResponse {
   // How many of them are new (never exported).
   int32 new_total = 40;
   // The count is bounded so its cost does not grow with the list: when true, new_total (and total when a
-  // category filter is set) is a lower bound, "10000+". The unfiltered total is always exact.
+  // category filter is set) is a lower bound, "10000+". The unfiltered total is exact, unless the user keeps words in
+  // another group too and the group has more than 10000: it is then a lower bound as well.
   bool counts_capped = 50;
 }
 
 message DeleteSavedWordRequest {
   string word = 10;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 20;
 }
 
 message DeleteSavedWordResponse {}
@@ -417,6 +461,8 @@ message ExportAnkiRequest {
   // Export exactly these words: category_id, uncategorized and scope are then ignored and exported words are
   // packed again. At most as many as the list may hold; words not in the list are skipped.
   repeated string words = 50;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 60;
 }
 
 message ExportAnkiResponse {
@@ -440,9 +486,14 @@ message CreateDeckLinkRequest {
   // Export exactly these words: category_id, uncategorized and scope are then ignored and exported words are
   // packed again. At most as many as the list may hold; words not in the list are skipped.
   repeated string words = 50;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 60;
 }
 
-message RemoveExportedWordsRequest {}
+message RemoveExportedWordsRequest {
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 10;
+}
 
 message RemoveExportedWordsResponse {
   // Words that left the list.
@@ -542,6 +593,8 @@ message ReviewCard {
   repeated int64 grade_intervals_seconds = 60;
   // The card is being learned (after Again or Hard); is_new stays for words never reviewed, the two exclude each other.
   bool learning = 70;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 80;
 }
 
 message GetReviewQueueRequest {
@@ -553,6 +606,8 @@ message GetReviewQueueRequest {
   string category_id = 20;
   // Only the words that have no category.
   bool uncategorized = 30;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 40;
 }
 
 message GetReviewQueueResponse {
@@ -589,6 +644,8 @@ message AddReviewBonusResponse {
 message SubmitReviewRequest {
   string word = 10;
   ReviewGrade grade = 20;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 30;
 }
 
 message SubmitReviewResponse {
@@ -627,7 +684,10 @@ message Category {
   int32 new_total = 40;
 }
 
-message ListCategoriesRequest {}
+message ListCategoriesRequest {
+  // The group whose words are counted. Required. The categories themselves belong to the user.
+  string group = 10;
+}
 message ListCategoriesResponse {
   repeated Category categories = 10;
   // Words in no category (total, new): for the "Uncategorized" filter.
@@ -661,6 +721,8 @@ message UpdateWordCategoriesRequest {
   repeated string words = 10;
   repeated string add_category_ids = 20;
   repeated string remove_category_ids = 30;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 40;
 }
 message UpdateWordCategoriesResponse {
   // Words that were in the list.
@@ -676,9 +738,7 @@ message Settings {
   bool allow_export_deck = 20;
   // Anki deck behind a link (CreateDeckLink).
   bool allow_export_link = 30;
-  // The dictionaries that can be looked up.
-  bool english_enabled = 40;
-  bool english_vi_enabled = 50;
+  reserved 40, 50;
   // An export takes the words out of the list (a user can still turn it off for themself).
   bool remove_after_export = 60;
   // Hours a word that left the list is kept before the cleanup deletes it (1 to 8760).
@@ -714,14 +774,19 @@ message Settings {
   int64 content_user_quota_ceiling = 200;
   int64 image_user_quota_ceiling = 210;
   int64 audio_user_quota_ceiling = 220;
+  // The dictionaries of the registry that can be looked up, by id. An id missing from the map takes the default
+  // of the registry. At least one must be on.
+  map<string, bool> dictionaries = 230;
 }
 
 // Preferences of one user. They only narrow what Settings allows.
 message UserSettings {
-  bool english_enabled = 10;
-  bool english_vi_enabled = 20;
-  // The dictionary selected first; one of the enabled ones.
-  Dictionary default_dictionary = 30;
+  reserved 10, 20, 30;
+  // The dictionaries the user wants, by id (an id missing from the map is on). They only narrow what Settings allows;
+  // at least one must stay on.
+  map<string, bool> dictionaries = 130;
+  // The id of the dictionary selected first; one of the enabled ones.
+  string default_dictionary = 140;
   // Deck name the export starts with ("My Words" when empty).
   string deck_name = 40;
   // Words per lookup the user wants to allow (1 to 20).
@@ -786,6 +851,17 @@ message SetUserQuotaResponse {
   StorageQuota effective = 30;
 }
 
+message RecalculateUserStorageRequest {
+  string user_id = 10;
+}
+message RecalculateUserStorageResponse {
+  StorageQuota used = 10;
+  StorageQuota override = 20;
+  StorageQuota effective = 30;
+  // What the counters were before the recalculation.
+  StorageQuota previous = 40;
+}
+
 // StorageUsage is what is stored and the limit of it, in bytes.
 message StorageUsage {
   int64 used = 10;
@@ -823,6 +899,8 @@ message StartExportRequest {
   // Only the words of this category; the id "uncategorized" (or uncategorized = true) keeps the words in none.
   string category_id = 30;
   bool uncategorized = 40;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 50;
 }
 message StartExportResponse {
   ExportJob job = 10;
@@ -875,6 +953,7 @@ message ExportJob {
   string finished_at = 90;
   // When the job and its files are deleted.
   string expires_at = 100;
+  string group = 120;
 }
 
 message ExportPart {
@@ -889,6 +968,8 @@ message ExportPart {
 message CheckSavedWordsRequest {
   // At most 100; they are normalized like the words of SaveWord, so a word that is not valid is simply not saved.
   repeated string words = 10;
+  // The group of the dictionaries the word belongs to ("en", ...), see ListDictionaries. Required.
+  string group = 20;
 }
 message CheckSavedWordsResponse {
   // The words of the request that are in the list (normalized), each with the ids of its categories.
