@@ -270,6 +270,15 @@ service DictionaryService {
       any_of: ["dictionary:settings:write"]
     };
   }
+  // RunCleanup runs the cleanup of dictionary-worker now instead of at its next tick: it deletes the words that
+  // left the list longer ago than the retention, the images and audio files no word uses (older than the unused
+  // file age) and the files without a row, and answers how many of each. FAILED_PRECONDITION cleanup_disabled
+  // when the server was not given the cleanup. Permission: dictionary:settings:write.
+  rpc RunCleanup(RunCleanupRequest) returns (RunCleanupResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:write"]
+    };
+  }
   // GetMyStorage returns what the user stores and the limit of each kind, own limit included.
   // Permission: dictionary:word:read.
   rpc GetMyStorage(GetMyStorageRequest) returns (GetMyStorageResponse) {
@@ -860,6 +869,18 @@ message RecalculateUserStorageResponse {
   StorageQuota effective = 30;
   // What the counters were before the recalculation.
   StorageQuota previous = 40;
+}
+
+message RunCleanupRequest {}
+message RunCleanupResponse {
+  // Words that left the list longer ago than the retention, now deleted.
+  int64 words = 10;
+  // Images and audio files no word used, deleted with their rows.
+  int32 images = 20;
+  int32 audio = 30;
+  // Files that had no row, deleted.
+  int32 orphan_images = 40;
+  int32 orphan_audio = 50;
 }
 
 // StorageUsage is what is stored and the limit of it, in bytes.
