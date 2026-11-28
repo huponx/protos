@@ -270,13 +270,21 @@ service DictionaryService {
       any_of: ["dictionary:settings:write"]
     };
   }
-  // RunCleanup runs the cleanup of dictionary-worker now instead of at its next tick: it deletes the words that
-  // left the list longer ago than the retention, the images and audio files no word uses (older than the unused
-  // file age) and the files without a row, and answers how many of each. FAILED_PRECONDITION cleanup_disabled
-  // when the server was not given the cleanup. Permission: dictionary:settings:write.
+  // RunCleanup asks for the cleanup of dictionary-worker to run now instead of at its next tick, and returns at
+  // once with the state of the request (pending): a worker takes it within seconds. It deletes the words that left
+  // the list longer ago than the retention, the images and audio files no word uses (older than the unused file
+  // age) and the files without a row. When a cleanup is pending or running already, that one stays and its state
+  // is returned. Follow it with GetCleanupStatus. Permission: dictionary:settings:write.
   rpc RunCleanup(RunCleanupRequest) returns (RunCleanupResponse) {
     option (authz.v1.rule) = {
       any_of: ["dictionary:settings:write"]
+    };
+  }
+  // GetCleanupStatus returns the latest cleanup an administrator asked for: where it is, and what it deleted once
+  // done. An empty status means none was asked for yet. Permission: dictionary:settings:read.
+  rpc GetCleanupStatus(GetCleanupStatusRequest) returns (GetCleanupStatusResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["dictionary:settings:read"]
     };
   }
   // GetMyStorage returns what the user stores and the limit of each kind, own limit included.
@@ -871,16 +879,31 @@ message RecalculateUserStorageResponse {
   StorageQuota previous = 40;
 }
 
+// CleanupRun is the latest cleanup an administrator asked for.
+message CleanupRun {
+  // "" (none yet), "pending" (waiting for a worker), "running", "done" or "failed".
+  string status = 10;
+  // Unix seconds; 0 when it has not happened yet.
+  int64 requested_at = 20;
+  int64 started_at = 30;
+  int64 finished_at = 40;
+  // What it deleted (once done): words that left the list longer ago than the retention, images and audio files no
+  // word used, and files that had no row.
+  int64 words = 50;
+  int32 images = 60;
+  int32 audio = 70;
+  int32 orphan_images = 80;
+  int32 orphan_audio = 90;
+  // Why it failed.
+  string error = 100;
+}
 message RunCleanupRequest {}
 message RunCleanupResponse {
-  // Words that left the list longer ago than the retention, now deleted.
-  int64 words = 10;
-  // Images and audio files no word used, deleted with their rows.
-  int32 images = 20;
-  int32 audio = 30;
-  // Files that had no row, deleted.
-  int32 orphan_images = 40;
-  int32 orphan_audio = 50;
+  CleanupRun run = 10;
+}
+message GetCleanupStatusRequest {}
+message GetCleanupStatusResponse {
+  CleanupRun run = 10;
 }
 
 // StorageUsage is what is stored and the limit of it, in bytes.
