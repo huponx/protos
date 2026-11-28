@@ -12,35 +12,25 @@ option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
 service InboxService {
   // ListInbox returns the notifications of the user, newest first, without the archived ones.
   rpc ListInbox(ListInboxRequest) returns (ListInboxResponse) {
-    option (authz.v1.rule) = {
-      public: true
-    };
+    option (authz.v1.rule) = {public: true};
   }
   rpc GetUnreadCount(GetUnreadCountRequest) returns (GetUnreadCountResponse) {
-    option (authz.v1.rule) = {
-      public: true
-    };
+    option (authz.v1.rule) = {public: true};
   }
   // MarkRead marks the given notifications (or all of them) as read. Ids of other users are ignored.
   rpc MarkRead(MarkReadRequest) returns (MarkReadResponse) {
-    option (authz.v1.rule) = {
-      public: true
-    };
+    option (authz.v1.rule) = {public: true};
   }
   // StreamInbox is the realtime channel of the bell: the first message carries the unread count, then one message
   // per change (a new item, or a read/archive from another tab), and a heartbeat every 25 seconds. The stream
   // stays open until the client or the gateway closes it (the gateway ends it after a few minutes so the session
   // is checked again); the client reconnects.
   rpc StreamInbox(StreamInboxRequest) returns (stream StreamInboxResponse) {
-    option (authz.v1.rule) = {
-      public: true
-    };
+    option (authz.v1.rule) = {public: true};
   }
   // Archive hides notifications from the list.
   rpc Archive(ArchiveRequest) returns (ArchiveResponse) {
-    option (authz.v1.rule) = {
-      public: true
-    };
+    option (authz.v1.rule) = {public: true};
   }
 }
 
