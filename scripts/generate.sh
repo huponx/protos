@@ -46,12 +46,6 @@ fi
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 tmpl="${tmp_dir}/buf.gen.yaml"
-if [ "${lang}" = "ts" ]; then
-  # the TypeScript generator is a protoc plugin of this repo: build it once per run and put it on PATH
-  mkdir -p "${tmp_dir}/bin"
-  ( cd "${proto_dir}/tools" && go build -o "${tmp_dir}/bin/protoc-gen-ts-permissions" ./protoc-gen-ts-permissions )
-  export PATH="${tmp_dir}/bin:${PATH}"
-fi
 render_template "${proto_dir}" "${lang}" "${tmpl}"
 
 # Generate into a staging dir first, so a failing plugin never leaves

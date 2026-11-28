@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package courier.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
+
+// PreferencesService is what the signed-in user chooses about their notifications: which categories reach them on
+// which channel, quiet hours, and the Telegram chat. The user is the subject of the token, never a field of a
+// request. Security events (mandatory categories) cannot be turned off.
+service PreferencesService {
+  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  // SetPreferences replaces the choices of the given categories and the quiet hours. A mandatory category is
+  // ignored (it stays on).
+  rpc SetPreferences(SetPreferencesRequest) returns (SetPreferencesResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  // StartTelegramBinding returns a one-time code (valid 15 minutes) and the link that opens the bot with it: the
+  // bot links the chat when it receives `/start <code>`.
+  rpc StartTelegramBinding(StartTelegramBindingRequest) returns (StartTelegramBindingResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc UnbindTelegram(UnbindTelegramRequest) returns (UnbindTelegramResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  // SubscribePush saves the push subscription of a browser (what PushManager.subscribe returned). The same endpoint
+  // again updates it, and moves it to the signed-in user.
+  rpc SubscribePush(SubscribePushRequest) returns (SubscribePushResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+  rpc UnsubscribePush(UnsubscribePushRequest) returns (UnsubscribePushResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
+}
+
+// One category of the catalog with the channels it can use and the user's choice per channel.
+message CategoryPreference {
+  // For example "security", "admin", "bvchain".
+  string category = 10;
+  // True when every event of the category is mandatory: it cannot be turned off.
+  bool mandatory = 20;
+  // The channels the events of this category use: "email", "telegram", "in_app".
+  repeated string channels = 30;
+  // The channels the user turned off. Empty (the default) means every channel is on.
+  repeated string disabled_channels = 40;
+}
+
+message QuietHours {
+  bool enabled = 10;
+  // "HH:MM" local time; the window may cross midnight (22:00 to 07:00).
+  string from = 20;
+  string to = 30;
+  // IANA name, for example "Asia/Ho_Chi_Minh".
+  string timezone = 40;
+}
+
+message TelegramState {
+  // False when the courier has no bot (TELEGRAM_BOT_USERNAME): the UI hides the section.
+  bool available = 10;
+  bool linked = 20;
+}
+
+message PushState {
+  // False when courier has no VAPID keys: the UI hides the section.
+  bool available = 10;
+  // The public VAPID key, for PushManager.subscribe (base64url).
+  string public_key = 20;
+  // The endpoints of the devices of the user; a browser compares its own.
+  repeated string endpoints = 30;
+}
+
+message GetPreferencesRequest {}
+
+message GetPreferencesResponse {
+  repeated CategoryPreference categories = 10;
+  QuietHours quiet_hours = 20;
+  TelegramState telegram = 30;
+  PushState push = 40;
+}
+
+message SetPreferencesRequest {
+  // Only the categories listed here change.
+  repeated CategoryPreference categories = 10;
+  QuietHours quiet_hours = 20;
+}
+
+message SetPreferencesResponse {}
+
+message StartTelegramBindingRequest {}
+
+message StartTelegramBindingResponse {
+  string code = 10;
+  // https://t.me/<bot>?start=<code>
+  string link = 20;
+  // Unix seconds.
+  int64 expires_at = 30;
+}
+
+message UnbindTelegramRequest {}
+
+message UnbindTelegramResponse {}
+
+message SubscribePushRequest {
+  // https URL of the push service of the browser.
+  string endpoint = 10;
+  // The keys of the subscription (base64url), from subscription.toJSON().keys.
+  string p256dh = 20;
+  string auth = 30;
+  string user_agent = 40;
+}
+
+message SubscribePushResponse {}
+
+message UnsubscribePushRequest {
+  string endpoint = 10;
+}
+
+message UnsubscribePushResponse {}

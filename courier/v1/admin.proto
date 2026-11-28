@@ -1,0 +1,331 @@
+syntax = "proto3";
+
+package courier.v1;
+
+import "authz/v1/options.proto";
+import "courier/v1/courier.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
+
+// AdminNotificationService is for the administrators (the admin app): the event types and their templates, the
+// announcements, and the delivery log. Every method needs a permission, see its comment.
+service AdminNotificationService {
+  // The event types of the catalog and which templates are customized. Permission: courier:template:read.
+  rpc ListEventTypes(ListEventTypesRequest) returns (ListEventTypesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:read"]
+    };
+  }
+  // The effective template of a channel and locale: the customized one, else the one built into courier (the
+  // starting point of an edit). Permission: courier:template:read.
+  rpc GetTemplate(GetTemplateRequest) returns (GetTemplateResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:read"]
+    };
+  }
+  // Renders a draft with sample data (or the given data) without saving it. Permission: courier:template:read.
+  rpc PreviewTemplate(PreviewTemplateRequest) returns (PreviewTemplateResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:read"]
+    };
+  }
+  rpc ListTemplateVersions(ListTemplateVersionsRequest) returns (ListTemplateVersionsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:read"]
+    };
+  }
+  // Saves a new version. The draft must render (INVALID_ARGUMENT, reason template_invalid, otherwise). The change
+  // reaches the sending processes within half a minute. Permission: courier:template:write.
+  rpc SaveTemplate(SaveTemplateRequest) returns (SaveTemplateResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:write"]
+    };
+  }
+  // Drops the customization: the built-in template is used again (the versions stay in the history).
+  rpc RevertTemplate(RevertTemplateRequest) returns (RevertTemplateResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:template:write"]
+    };
+  }
+  // Sends an announcement. Permission: courier:broadcast:send.
+  rpc CreateBroadcast(CreateBroadcastRequest) returns (CreateBroadcastResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:broadcast:send"]
+    };
+  }
+  rpc ListBroadcasts(ListBroadcastsRequest) returns (ListBroadcastsResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:broadcast:send"]
+    };
+  }
+  // Webhooks: endpoints that receive events (a Slack channel, or any service). Permission: courier:webhook:manage.
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:webhook:manage"]
+    };
+  }
+  // Creates a webhook (no id) or changes one. A new "generic" webhook gets a signing secret, returned once.
+  rpc SaveWebhook(SaveWebhookRequest) returns (SaveWebhookResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:webhook:manage"]
+    };
+  }
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (DeleteWebhookResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:webhook:manage"]
+    };
+  }
+  // Sends a test message now and reports what the endpoint answered.
+  rpc TestWebhook(TestWebhookRequest) returns (TestWebhookResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:webhook:manage"]
+    };
+  }
+  // The delivery log, newest first. Permission: courier:delivery:read.
+  rpc ListDeliveries(ListDeliveriesRequest) returns (ListDeliveriesResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:delivery:read"]
+    };
+  }
+}
+
+message TemplateInfo {
+  string locale = 10;
+  // "email", "telegram" or "in_app".
+  string channel = 20;
+  bool customized = 30;
+  // Version of the customization; 0 when built in.
+  int32 version = 40;
+  // The template directory when it is not the one of the event type: `<template>_digest`, the message that groups
+  // several events. Empty: the template of the event type.
+  string template = 50;
+}
+
+message EventTypeInfo {
+  string type = 10;
+  string category = 20;
+  // The template directory the type renders.
+  string template = 30;
+  repeated string channels = 40;
+  bool mandatory = 50;
+  string severity = 60;
+  // The keys of `data`.
+  repeated string required = 70;
+  repeated string optional = 80;
+  // True for the types an announcement can use.
+  bool broadcast = 90;
+  // One entry per locale and channel the type has a template for.
+  repeated TemplateInfo templates = 100;
+  // How long events of this type wait to be grouped into one message ("10m"); empty: they are not grouped.
+  string digest_window = 110;
+}
+
+message ListEventTypesRequest {}
+
+message ListEventTypesResponse {
+  repeated EventTypeInfo event_types = 10;
+  repeated string locales = 20;
+}
+
+// The text of a template. Email: subject, text, html. Telegram: text. In app: subject is the title, text the body.
+message TemplateContent {
+  string subject = 10;
+  string text = 20;
+  string html = 30;
+}
+
+message GetTemplateRequest {
+  string template = 10;
+  string locale = 20;
+  string channel = 30;
+}
+
+message GetTemplateResponse {
+  TemplateContent content = 10;
+  bool customized = 20;
+  int32 version = 30;
+  string updated_by = 40;
+  // Unix seconds; 0 when built in.
+  int64 updated_at = 50;
+}
+
+message PreviewTemplateRequest {
+  string template = 10;
+  string locale = 20;
+  string channel = 30;
+  TemplateContent content = 40;
+  // Values of the keys; a key left out takes a sample value.
+  map<string, string> data = 50;
+}
+
+message PreviewTemplateResponse {
+  TemplateContent rendered = 10;
+}
+
+message TemplateVersion {
+  int32 version = 10;
+  TemplateContent content = 20;
+  string updated_by = 30;
+  int64 updated_at = 40;
+  // True for the entry that records a revert to the built-in template.
+  bool reverted = 50;
+}
+
+message ListTemplateVersionsRequest {
+  string template = 10;
+  string locale = 20;
+  string channel = 30;
+}
+
+message ListTemplateVersionsResponse {
+  // Newest first.
+  repeated TemplateVersion versions = 10;
+}
+
+message SaveTemplateRequest {
+  string template = 10;
+  string locale = 20;
+  string channel = 30;
+  TemplateContent content = 40;
+}
+
+message SaveTemplateResponse {
+  int32 version = 10;
+}
+
+message RevertTemplateRequest {
+  string template = 10;
+  string locale = 20;
+  string channel = 30;
+}
+
+message RevertTemplateResponse {}
+
+message Audience {
+  // Everyone with an active account.
+  bool all = 10;
+  // Active users holding this role.
+  string role = 20;
+  // These users.
+  repeated string user_ids = 30;
+}
+
+message CreateBroadcastRequest {
+  // A type of the catalog marked as broadcast (for example "system.announcement").
+  string event_type = 10;
+  Audience audience = 20;
+  google.protobuf.Struct data = 30;
+  // Send on these channels only ("email", "in_app", "push"); empty: every channel of the type. The users' own choices
+  // still apply.
+  repeated string channels = 40;
+}
+
+message Broadcast {
+  string id = 10;
+  string event_type = 20;
+  Audience audience = 30;
+  string created_by = 40;
+  int64 created_at = 50;
+  // Users the announcement was addressed to, and those that got nothing (no e-mail, everything turned off).
+  int32 recipients = 60;
+  int32 skipped = 70;
+  // The channels it was sent on (empty: every channel of the type, as before channels could be chosen).
+  repeated string channels = 80;
+}
+
+message CreateBroadcastResponse {
+  Broadcast broadcast = 10;
+}
+
+message ListBroadcastsRequest {
+  int32 page_size = 10;
+  string page_token = 20;
+}
+
+message ListBroadcastsResponse {
+  repeated Broadcast broadcasts = 10;
+  string next_page_token = 20;
+}
+
+message ListDeliveriesRequest {
+  // Empty: any.
+  DeliveryStatus status = 10;
+  string channel = 20;
+  string notification_id = 30;
+  string user_id = 40;
+  // Part of the address.
+  string address = 50;
+  int32 page_size = 60;
+  string page_token = 70;
+}
+
+message DeliveryRecord {
+  Delivery delivery = 10;
+  string notification_id = 20;
+  string event_type = 30;
+  string user_id = 40;
+  // Unix seconds.
+  int64 created_at = 50;
+  // How many other events went out in the same message (a digest).
+  int32 merged = 60;
+}
+
+message ListDeliveriesResponse {
+  repeated DeliveryRecord deliveries = 10;
+  string next_page_token = 20;
+}
+
+// A webhook receives the events it subscribes to, once per event (not per user).
+message Webhook {
+  string id = 10;
+  string name = 20;
+  // https URL (http only for a local run). The path may carry a secret (Slack incoming webhooks do): it is shown in
+  // the admin app as saved, so give the permission to administrators only.
+  string url = 30;
+  // "slack": a Slack incoming webhook ({"text": ...}). "generic": a signed JSON POST (see the README of courier).
+  string kind = 40;
+  // Event types to send: an exact type ("bvchain.failed"), a prefix ("bvchain.*") or "*" for every type that may
+  // go to a webhook. Mandatory events (security, account) never do: they carry links and codes.
+  repeated string events = 50;
+  bool enabled = 60;
+  // Whether a signing secret exists (generic only; the secret itself is shown once, when it is made).
+  bool has_secret = 70;
+  int64 created_at = 80;
+}
+
+message ListWebhooksRequest {}
+
+message ListWebhooksResponse {
+  repeated Webhook webhooks = 10;
+}
+
+message SaveWebhookRequest {
+  // Empty: create.
+  string id = 10;
+  Webhook webhook = 20;
+  // Make a new signing secret (a generic webhook); the old one stops working.
+  bool rotate_secret = 30;
+}
+
+message SaveWebhookResponse {
+  Webhook webhook = 10;
+  // Only when a secret was made now.
+  string secret = 20;
+}
+
+message DeleteWebhookRequest {
+  string id = 10;
+}
+
+message DeleteWebhookResponse {}
+
+message TestWebhookRequest {
+  string id = 10;
+}
+
+message TestWebhookResponse {
+  bool ok = 10;
+  // The HTTP status the endpoint answered, or the error text.
+  string result = 20;
+}
