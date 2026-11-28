@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package courier.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
+// Every permission of courier. The inbox of a user needs none (any signed-in user reads their own inbox).
+option (authz.v1.permissions) = {
+  permissions: [
+    {
+      name: "courier:notification:send"
+      description: "Send notifications (services)"
+    },
+    {
+      name: "courier:notification:manage"
+      description: "Retry a failed delivery of a notification"
+    },
+    {
+      name: "courier:delivery:read"
+      description: "See the delivery log (who was sent what, and how it went)"
+    },
+    {
+      name: "courier:template:read"
+      description: "See the event types and the templates of the messages"
+    },
+    {
+      name: "courier:template:write"
+      description: "Edit and revert the templates of the messages"
+    },
+    {
+      name: "courier:webhook:manage"
+      description: "Configure the webhooks (Slack or signed JSON) that receive events"
+    },
+    {
+      name: "courier:broadcast:send"
+      description: "Send an announcement to all users, a role or chosen users"
+    }
+  ]
+};

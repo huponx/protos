@@ -155,6 +155,12 @@ service IdentityService {
   rpc DisableMyMFA(DisableMyMFARequest) returns (DisableMyMFAResponse) {
     option (authz.v1.rule) = {public: true};
   }
+  // RegenerateMyRecoveryCodes replaces the recovery codes (the old ones stop working) after the password and a code of the
+  // authenticator app (a recovery code is not accepted: it would spend the code it is about to replace). Returns the new
+  // codes, shown once. Refused when MFA is off.
+  rpc RegenerateMyRecoveryCodes(RegenerateMyRecoveryCodesRequest) returns (RegenerateMyRecoveryCodesResponse) {
+    option (authz.v1.rule) = {public: true};
+  }
   // The own passkeys (WebAuthn credentials), a way to sign in next to the password. The browser runs the ceremony: Begin
   // returns the options for navigator.credentials.create (as the JSON of the web API) and Finish takes the answer back, so
   // the same steps as the account page of the sign in app. Adding and deleting need the current password. They answer
@@ -614,6 +620,16 @@ message DisableMyMFARequest {
 }
 
 message DisableMyMFAResponse {}
+
+message RegenerateMyRecoveryCodesRequest {
+  string password = 10;
+  // A code of the authenticator app.
+  string code = 20;
+}
+
+message RegenerateMyRecoveryCodesResponse {
+  repeated string recovery_codes = 10;
+}
 
 message Passkey {
   string id = 10;

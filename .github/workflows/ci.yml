@@ -138,7 +138,7 @@ jobs:
 
           if [ "${EVENT}" = "push" ]; then
             if [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ]; then
-              pattern='(^|/)[^/]+\.proto$|^buf\.yaml$|^buf\.gen\.[a-z]+\.yaml$|^scripts/(generate|lib)\.sh$|^tools/.*\.(go|mod|sum)$'
+              pattern='(^|/)[^/]+\.proto$|^buf\.yaml$|^buf\.gen\.[a-z]+\.yaml$|^scripts/(generate|lib)\.sh$'
               if ! git diff --name-only "${BEFORE}" "${GITHUB_SHA}" | grep -Eq "${pattern}"; then
                 echo "skip_release=true" >> "${GITHUB_OUTPUT}"
                 echo "reason=no_contract_changes" >> "${GITHUB_OUTPUT}"
