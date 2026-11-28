@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package courier.v1;
+
+import "authz/v1/options.proto";
+
+option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
+
+// InboxService is the in-app inbox of the signed-in user (the bell). The user is the subject of the token, never a
+// field of a request: a user reads and changes only their own inbox. Any signed-in user may call it; a service
+// token (no user) is refused.
+service InboxService {
+  // ListInbox returns the notifications of the user, newest first, without the archived ones.
+  rpc ListInbox(ListInboxRequest) returns (ListInboxResponse) {
+    option (authz.v1.rule) = {
+      public: true
+    };
+  }
+  rpc GetUnreadCount(GetUnreadCountRequest) returns (GetUnreadCountResponse) {
+    option (authz.v1.rule) = {
+      public: true
+    };
+  }
+  // MarkRead marks the given notifications (or all of them) as read. Ids of other users are ignored.
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse) {
+    option (authz.v1.rule) = {
+      public: true
+    };
+  }
+  // StreamInbox is the realtime channel of the bell: the first message carries the unread count, then one message
+  // per change (a new item, or a read/archive from another tab), and a heartbeat every 25 seconds. The stream
+  // stays open until the client or the gateway closes it (the gateway ends it after a few minutes so the session
+  // is checked again); the client reconnects.
+  rpc StreamInbox(StreamInboxRequest) returns (stream StreamInboxResponse) {
+    option (authz.v1.rule) = {
+      public: true
+    };
+  }
+  // Archive hides notifications from the list.
+  rpc Archive(ArchiveRequest) returns (ArchiveResponse) {
+    option (authz.v1.rule) = {
+      public: true
+    };
+  }
+}
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_INFO = 10;
+  SEVERITY_WARNING = 20;
+  SEVERITY_CRITICAL = 30;
+}
+
+message InboxItem {
+  string id = 10;
+  string title = 20;
+  string body = 30;
+  // A path or URL to open; empty when there is nothing to open.
+  string link = 40;
+  Severity severity = 50;
+  bool read = 60;
+  // Unix seconds.
+  int64 created_at = 70;
+}
+
+message ListInboxRequest {
+  // Default 20, at most 100.
+  int32 page_size = 10;
+  // The next_page_token of the previous page.
+  string page_token = 20;
+  bool unread_only = 30;
+}
+
+message ListInboxResponse {
+  repeated InboxItem items = 10;
+  string next_page_token = 20;
+  int32 unread = 30;
+}
+
+message GetUnreadCountRequest {}
+
+message GetUnreadCountResponse {
+  int32 unread = 10;
+}
+
+message MarkReadRequest {
+  repeated string ids = 10;
+  // Mark every notification of the user; ids is then ignored.
+  bool all = 20;
+}
+
+message MarkReadResponse {
+  int32 unread = 10;
+}
+
+message ArchiveRequest {
+  repeated string ids = 10;
+}
+
+message ArchiveResponse {
+  int32 unread = 10;
+}
+
+message StreamInboxRequest {}
+
+message StreamInboxResponse {
+  // The unread count after the change.
+  int32 unread = 10;
+  // The new notification; absent for a read/archive change, the first message and heartbeats.
+  InboxItem item = 20;
+  // Only keeps the connection alive; the client ignores it.
+  bool heartbeat = 30;
+}

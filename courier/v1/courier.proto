@@ -2,16 +2,52 @@ syntax = "proto3";
 
 package courier.v1;
 
+import "authz/v1/options.proto";
+import "google/protobuf/struct.proto";
+
 option go_package = "github.com/huponx/protogen/courier/v1;courierv1";
 
+// CourierService is for services (Kubernetes ServiceAccount token, or a token holding the permission).
+// The inbox of a user is InboxService.
 service CourierService {
-  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse);
+  rpc SendNotification(SendNotificationRequest) returns (SendNotificationResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:notification:send"]
+    };
+  }
+  // Notify sends an event of the catalog (courier/internal/catalog) to users and/or raw addresses.
+  // Courier picks the channels, addresses and locale; the caller only says what happened and to whom.
+  rpc Notify(NotifyRequest) returns (NotifyResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:notification:send"]
+    };
+  }
+  // GetNotification returns the state of every delivery of a notification (the audit trail).
+  rpc GetNotification(GetNotificationRequest) returns (GetNotificationResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:notification:manage"]
+    };
+  }
+  // RetryDelivery puts a failed or dead delivery back in the queue (resets its attempts).
+  rpc RetryDelivery(RetryDeliveryRequest) returns (RetryDeliveryResponse) {
+    option (authz.v1.rule) = {
+      any_of: ["courier:notification:manage"]
+    };
+  }
 }
 
 enum Channel {
   CHANNEL_UNSPECIFIED = 0;
   CHANNEL_EMAIL = 10;
   CHANNEL_TELEGRAM = 20;
+  // The inbox of the user (bell in the web apps); only by user_ids, never a raw recipient.
+  CHANNEL_IN_APP = 30;
+  // An HTTP endpoint of the administrators (Slack, or any service that takes a signed JSON POST); configured in the
+  // admin app, never a raw recipient.
+  CHANNEL_WEBHOOK = 40;
+  // A browser notification (Web Push) on a device the user subscribed; by user_ids only. It renders the in-app
+  // template (title and body) and opens data.link when clicked.
+  CHANNEL_PUSH = 50;
 }
 
 message Recipient {
@@ -30,4 +66,76 @@ message SendNotificationRequest {
 message SendNotificationResponse {
   string notification_id = 10;
   int32 queued = 20;
+}
+
+enum DeliveryStatus {
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  // Waiting for the first send or for the next retry (next_attempt_at).
+  DELIVERY_STATUS_PENDING = 10;
+  DELIVERY_STATUS_SENT = 20;
+  // Permanent error (bounce, chat blocked, template cannot render): not retried.
+  DELIVERY_STATUS_FAILED = 30;
+  // Out of attempts: the dead-letter state, RetryDelivery sends it again.
+  DELIVERY_STATUS_DEAD = 40;
+  // Not sent: the user turned the channel off for the category. Kept for the audit.
+  DELIVERY_STATUS_SKIPPED = 50;
+}
+
+message Delivery {
+  string id = 10;
+  Channel channel = 20;
+  string address = 30;
+  DeliveryStatus status = 40;
+  int32 attempts = 50;
+  string last_error = 60;
+  // RFC 3339; empty when not applicable.
+  string next_attempt_at = 70;
+  string sent_at = 80;
+}
+
+message GetNotificationRequest {
+  string notification_id = 10;
+}
+
+message GetNotificationResponse {
+  string notification_id = 10;
+  string template_id = 20;
+  string created_at = 30;
+  repeated Delivery deliveries = 40;
+}
+
+message RetryDeliveryRequest {
+  string delivery_id = 10;
+}
+
+message RetryDeliveryResponse {
+  Delivery delivery = 10;
+}
+
+message NotifyRequest {
+  // Optional; unique while the event is kept. A repeat returns the first event_id and sends nothing.
+  string idempotency_key = 10;
+  // A type of the catalog, for example "security.password_reset". Unknown types are rejected.
+  string event_type = 20;
+  // Users of identity. Courier resolves each one to an address and a locale.
+  repeated string user_ids = 30;
+  // Raw addresses (a person without an account, an operations chat). Used together with or instead of user_ids.
+  repeated Recipient recipients = 40;
+  // Event data. Validated against the catalog: required keys present, unknown keys rejected.
+  // Values are sent to the templates as text (numbers and booleans are formatted).
+  google.protobuf.Struct data = 50;
+  // Locale for raw recipients (and for users without one); empty: the default locale of courier.
+  string locale_override = 60;
+  // Only these channels of the event type ("email", "in_app", "push"), for example an announcement that goes to the
+  // bell only. Empty: every channel of the type. A channel the type does not have is refused (channel_unknown). The
+  // choices of the users still apply, and webhooks are not channels of a type: they follow their own subscriptions.
+  repeated string channels = 70;
+}
+
+message NotifyResponse {
+  string event_id = 10;
+  // Number of deliveries created; 0 for a repeated idempotency_key.
+  int32 queued = 20;
+  // user_ids that got no delivery (no e-mail on record).
+  repeated string skipped_user_ids = 30;
 }
